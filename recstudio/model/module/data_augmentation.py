@@ -1,5 +1,6 @@
 import math
 import os
+import dgl
 import torch
 import random
 import faiss
@@ -9,6 +10,7 @@ import scipy.sparse as sp
 import numpy as np
 from typing import Optional, Union
 import torch.nn.functional as F
+from dgl.nn.pytorch.conv import GraphConv
 from torch.nn.utils.rnn import pad_sequence
 from recstudio.model.basemodel.recommender import Recommender
 from recstudio.model.module import functional as recfn
@@ -566,6 +568,77 @@ class SimGCLAugmentation(torch.nn.Module):
                 self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
 
         output_dict['cl_loss'] = user_cl_loss + item_cl_loss
+
+        return output_dict
+
+class GCL4SRAugmentation(torch.nn.Module):
+
+    def __init__(self, config, train_data) -> None:
+        super().__init__()
+        self.config = config
+        self.fuid = train_data.fuid
+        self.fiid = train_data.fiid
+        self.num_users = train_data.num_users
+        self.num_items = train_data.num_items
+        self.k = self.config['k']
+        self.gnn_layers = self.config['gnn_layers']
+        self.noise = self.config['noise']
+        self.gnn_conv = GraphConv(1, 1, weight=False, bias=False, allow_zero_in_degree=True) # LightGCN conv
+        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='cosine')
+        self.global_graph_construction(train_data)
+
+    def global_graph_construction(self, train_data : dataset.TripletDataset):
+        history_matrix, history_len, n_items = train_data.user_hist, train_data.user_count, train_data.num_items
+        history_matrix = history_matrix.tolist()
+        row, col, data = [], [], []
+        for idx in range(len(history_len)):
+            item_list_len = history_len[idx]
+            item_list = history_matrix[idx][:item_list_len]
+            for item_idx in range(item_list_len - 1):
+                target_num = min(self.k, item_list_len - item_idx - 1)
+                row += [item_list[item_idx]] * target_num
+                col += item_list[item_idx + 1: item_idx + 1 + target_num]
+                data.append(1 / np.arange(1, 1 + target_num))
+        data = np.concatenate(data)
+        sparse_matrix = sp.csc_matrix((data, (row, col)), shape=(n_items, n_items))
+        sparse_matrix = sparse_matrix + sparse_matrix.T + sp.eye(n_items)
+        degree = np.array((sparse_matrix > 0).sum(1)).flatten()
+        degree = np.nan_to_num(1 / degree, posinf=0)
+        degree = sp.diags(degree)
+        norm_adj = (degree @ sparse_matrix + sparse_matrix @ degree).tocoo()
+        g = dgl.from_scipy(norm_adj)
+        g.edata['weight'] = torch.tensor(norm_adj.data)
+        self.g = g
+        norm_adj = torch.sparse_coo_tensor(
+            np.row_stack([norm_adj.row, norm_adj.col]),
+            norm_adj.data,
+            (n_items, n_items),
+            dtype=torch.float32
+        )
+        self.norm_adj = norm_adj
+
+    def get_gnn_embeddings(self, emb, device, noise=True):
+        self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
+        emb_list = [emb]
+        for idx in range(self.gnn_layers):
+            emb = self.gnn_conv(self.g, emb)
+            random_noise = torch.rand_like(emb, device=device)
+            emb += torch.sign(emb) * F.normalize(random_noise, dim=-1) * self.noise
+            emb_list.append(emb)
+        emb = torch.stack(emb_list, dim=1).mean(1)
+        return emb
+
+    def forward(self, batch, item_emb:torch.nn.Embedding):
+        output_dict = {}
+        device = item_emb.weight.device
+
+        i_idx = torch.unique(batch[self.fiid]).to(device)
+        item_all_vec1 = self.get_gnn_embeddings(item_emb.weight, device)
+        item_all_vec2 = self.get_gnn_embeddings(item_emb.weight, device)
+
+        item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
+
+        output_dict['cl_loss'] = item_cl_loss
 
         return output_dict
 
