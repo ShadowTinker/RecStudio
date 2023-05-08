@@ -1,4 +1,5 @@
 import dgl
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -83,6 +84,7 @@ class DGNNQueryEncoder(nn.Module):
     def __init__(self, fiid, embed_dim, n_head, dropout, n_layer, item_encoder) -> None:
         super().__init__()
         self.fiid = fiid
+        self.embed_dim = embed_dim
         self.item_encoder = item_encoder
         self.n_items = len(self.item_encoder.weight)
         self.agnn = AGNN(n_layer, embed_dim, n_head, dropout, dropout)
@@ -93,6 +95,12 @@ class DGNNQueryEncoder(nn.Module):
         self.att_linear2 = nn.Linear(embed_dim, embed_dim)
         self.att_linear3 = nn.Linear(embed_dim, 1, bias=False)
         self.att_linear4 = nn.Linear(embed_dim * 2, embed_dim)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        stdv = 1.0 / math.sqrt(self.embed_dim)
+        for weight in self.parameters():
+            weight.data.uniform_(-stdv, stdv)
 
     def build_batch_graph(self, item_seq : torch.Tensor, seq_len):
         device = item_seq.device
