@@ -1,7 +1,7 @@
-experimentName: SASRec-ml-100k
+experimentName: SASRec-amazon-beauty
 searchSpaceFile: ../search_space/SASRec.json
 
-trialCommand: python3 run.py -m SASRec --mode tune
+trialCommand: python3 run.py -m SASRec -d amazon-beauty --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
