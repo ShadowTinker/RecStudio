@@ -642,6 +642,71 @@ class GCL4SRAugmentation(torch.nn.Module):
 
         return output_dict
 
+class MyGCL4SRAugmentation(torch.nn.Module):
+
+    def __init__(self, config, train_data) -> None:
+        super().__init__()
+        self.config = config
+        self.fuid = train_data.fuid
+        self.fiid = train_data.fiid
+        self.num_users = train_data.num_users
+        self.num_items = train_data.num_items
+        self.k = self.config['k']
+        self.gnn_layers = self.config['gnn_layers']
+        self.noise = self.config['noise']
+        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='cosine')
+        self.global_graph_construction(train_data)
+
+    def global_graph_construction(self, train_data : dataset.TripletDataset):
+        history_matrix, history_len, n_items = train_data.user_hist, train_data.user_count, train_data.num_items
+        history_matrix = history_matrix.tolist()
+        row, col, data = [], [], []
+        for idx in range(len(history_len)):
+            item_list_len = history_len[idx]
+            item_list = history_matrix[idx][:item_list_len]
+            for item_idx in range(item_list_len - 1):
+                target_num = min(self.k, item_list_len - item_idx - 1)
+                row += [item_list[item_idx]] * target_num
+                col += item_list[item_idx + 1: item_idx + 1 + target_num]
+                data.append(1 / np.arange(1, 1 + target_num))
+        data = np.concatenate(data)
+        sparse_matrix = sp.csc_matrix((data, (row, col)), shape=(n_items, n_items))
+        sparse_matrix = sparse_matrix + sparse_matrix.T + sp.eye(n_items)
+        degree = np.array((sparse_matrix > 0).sum(1)).flatten()
+        degree = np.nan_to_num(1 / degree, posinf=0)
+        degree = sp.diags(degree)
+        norm_adj = (degree @ sparse_matrix + sparse_matrix @ degree).tocoo()
+        g = dgl.from_scipy(norm_adj)
+        g.edata['weight'] = torch.tensor(norm_adj.data)
+        self.g = g
+        norm_adj = torch.sparse_coo_tensor(
+            np.row_stack([norm_adj.row, norm_adj.col]),
+            norm_adj.data,
+            (n_items, n_items),
+            dtype=torch.float32
+        )
+        self.norm_adj = norm_adj
+
+    def get_gnn_embeddings(self, emb, device, graph_list, gnns):
+        for idx, (g, layer) in enumerate(zip(graph_list, gnns)):
+            emb = layer(g, emb)
+        return emb
+
+    def forward(self, batch, item_emb:torch.nn.Embedding):
+        output_dict = {}
+        device = item_emb.weight.device
+
+        item_seq, seq_len = batch['in_' + self.fiid], batch['seqlen']
+        mask = torch.arange(item_seq.size(-1)).expand_as(item_seq) < seq_len.unsqueeze(1)
+        item_all_vec1 = self.get_gnn_embeddings(item_emb.weight, device)
+        item_all_vec2 = self.get_gnn_embeddings(item_emb.weight, device)
+
+        item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[item_seq], item_all_vec2[item_seq])
+
+        output_dict['cl_loss'] = item_cl_loss
+
+        return output_dict
+
 # Sequence augmentation models
 class CL4SRecAugmentation(torch.nn.Module):
 
