@@ -1,5 +1,5 @@
 model:
-  hidden_size: 64
+  hidden_size: 256
   layer_num: 2
   head_num: 2
   dropout_rate: 0.5
@@ -7,11 +7,9 @@ model:
   layer_norm_eps: 1e-12
   # Graph contrastive
   k: 2
-  gnn_layers: 2
-  gnn: 'lightgcn'
-  noise: 0.1
   temperature: 0.2
   cl_weight: 0.1
+  mmd_weight: 0.1
 
 
 train:
