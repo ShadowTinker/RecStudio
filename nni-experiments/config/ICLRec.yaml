@@ -22,11 +22,11 @@ tuner:                          # Configure the tuning algorithm.
 #     threshold: 0.9
 #     gap: 1
 
-# assessor:
-#   name: Medianstop
-#   classArgs:
-#     optimize_mode: maximize
-#     start_step: 200
+assessor:
+  name: Medianstop
+  classArgs:
+    optimize_mode: maximize
+    start_step: 150
 # Configure the training platform.
 # Supported platforms: local, remote, openpai, aml, kubeflow, kubernetes, adl.
 

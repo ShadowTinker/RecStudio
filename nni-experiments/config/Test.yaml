@@ -1,7 +1,7 @@
-experimentName: GCL4SR-amazon
-searchSpaceFile: ../search_space/GCL4SR.json
+experimentName: Test-amazon-beauty
+searchSpaceFile: ../search_space/Test.json
 
-trialCommand: python3 run.py -m GCL4SR -d amazon-beauty --mode tune
+trialCommand: python3 run.py -m Test -d amazon-beauty --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
