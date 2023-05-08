@@ -67,9 +67,9 @@ train:
 
 eval:
     batch_size: 128
-    cutoff: [5, 10, 20]
+    cutoff: [20, 50, 10]
     val_metrics: [ndcg, recall]
     val_n_epoch: 1
-    test_metrics: [recall, precision, map, ndcg, mrr, hit]
+    test_metrics: [ndcg, recall, precision, map, mrr, hit]
     topk: 100
     save_path: './saved/'

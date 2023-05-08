@@ -3,5 +3,8 @@ data:
   train_rep: True
   split_ratio: 2
 
+train:
+  batch_size: 256
+
 eval:
   batch_size: 128

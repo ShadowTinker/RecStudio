@@ -1,0 +1,22 @@
+{
+    "train/learning_rate": {
+        "_type": "choice",
+        "_value": [0.001]
+    },
+    "model/dropout_rate": {
+        "_type": "choice",
+        "_value": [0.5]
+    },
+    "model/num_intent_clusters": {
+        "_type": "choice",
+        "_value": [128, 256, 512]
+    },
+    "model/cl_weight": {
+        "_type": "choice",
+        "_value": [0.2, 0.4, 0.6, 0.8]
+    },
+    "model/intent_cl_weight": {
+        "_type": "choice",
+        "_value": [0.2, 0.4, 0.6, 0.8]
+    }
+}

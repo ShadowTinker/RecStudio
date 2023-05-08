@@ -1,0 +1,22 @@
+{
+    "train/learning_rate": {
+        "_type": "choice",
+        "_value": [0.001]
+    },
+    "model/k": {
+        "_type": "choice",
+        "_value": [2]
+    },
+    "model/noise": {
+        "_type": "choice",
+        "_value": [0.2, 0.4, 0.6, 0.8, 1]
+    },
+    "model/cl_weight": {
+        "_type": "choice",
+        "_value": [0.2, 0.4, 0.6, 0.8, 1]
+    },
+    "model/temperature": {
+        "_type": "choice",
+        "_value": [0.1, 0.2, 0.5, 1]
+    }
+}
