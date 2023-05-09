@@ -9,7 +9,7 @@
     },
     "model/num_intent_clusters": {
         "_type": "choice",
-        "_value": [256]
+        "_value": [128, 256]
     },
     "model/cl_weight": {
         "_type": "choice",

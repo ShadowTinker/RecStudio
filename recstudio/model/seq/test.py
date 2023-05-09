@@ -10,7 +10,7 @@ class Test(SASRec):
 
     def training_step(self, batch):
         output = self.forward(batch, False)
-        cl_output = self.augmentation_model(batch, self.item_encoder)
+        cl_output = self.augmentation_model(batch, self.item_encoder.weight)
         loss_value = self.loss_fn(batch[self.frating], **output['score']) \
            + self.config['model']['cl_weight'] * cl_output['cl_loss']
         return loss_value

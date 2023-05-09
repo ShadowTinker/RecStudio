@@ -8,9 +8,9 @@ model:
   # Graph contrastive
   k: 2
   gnn_layers: 2
-  noise: 0.2
-  temperature: 0.1
-  cl_weight: 0.1
+  noise: 0.05
+  temperature: 0.2
+  cl_weight: 0
 
 train:
   batch_size: 256

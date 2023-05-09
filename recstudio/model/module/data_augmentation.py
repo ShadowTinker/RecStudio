@@ -628,6 +628,51 @@ class MyAugmentation(torch.nn.Module):
         emb = torch.stack(emb_list, dim=1).mean(1)
         return emb
 
+    def forward(self, batch, item_emb:torch.Tensor):
+        output_dict = {}
+        device = item_emb.device
+
+        i_idx = torch.unique(batch[self.fiid]).to(device)
+        item_all_vec1 = self.get_gnn_embeddings(item_emb, device)
+        item_all_vec2 = self.get_gnn_embeddings(item_emb, device)
+
+        item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
+
+        output_dict['cl_loss'] = item_cl_loss
+
+        return output_dict
+
+class MyAugmentation2(torch.nn.Module):
+
+    def __init__(self, config, train_data, g, gnn_conv) -> None:
+        super().__init__()
+        self.config = config
+        self.fuid = train_data.fuid
+        self.fiid = train_data.fiid
+        self.num_users = train_data.num_users
+        self.num_items = train_data.num_items
+        self.k = self.config['k']
+        self.gnn_layers = self.config['gnn_layers']
+        self.noise = self.config['noise']
+        self.gnn_conv = gnn_conv
+        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='cosine')
+        self.g = g
+
+    def update_graph(self, g):
+        self.g = g
+
+    def get_gnn_embeddings(self, emb, device, noise=True):
+        self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
+        emb_list = [emb]
+        for layer in self.gnn_conv:
+            emb = layer(self.g, emb)
+            if noise:
+                random_noise = torch.rand_like(emb, device=device)
+                emb += torch.sign(emb) * F.normalize(random_noise, dim=-1) * self.noise
+            emb_list.append(emb)
+        emb = torch.stack(emb_list, dim=1).mean(1)
+        return emb
+
     def forward(self, batch, item_emb:torch.nn.Embedding):
         output_dict = {}
         device = item_emb.weight.device
