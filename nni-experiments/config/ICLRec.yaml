@@ -1,11 +1,11 @@
-experimentName: ICLRec-sports
+experimentName: ICLRec-yelp
 searchSpaceFile: ../search_space/ICLRec.json
 
-trialCommand: python3 run.py -m ICLRec -d amazon-sports --mode tune
+trialCommand: python3 run.py -m ICLRec -d yelp --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
-trialConcurrency: 2            # Run 4 trials concurrently.
+trialConcurrency: 4            # Run 4 trials concurrently.
 maxTrialNumber: 1000              # Generate at most 10 trials.
 maxExperimentDuration: 100d       # Stop generating trials after 1 hour.
 
@@ -34,4 +34,4 @@ trainingService:
   platform: local
   useActiveGpu: true
   gpuIndices: 0,1
-  maxTrialNumberPerGpu: 1
+  maxTrialNumberPerGpu: 2
