@@ -1,7 +1,7 @@
-experimentName: SASRec-amazon-sports
-searchSpaceFile: ../search_space/SASRec.json
+experimentName: Test3-yelp
+searchSpaceFile: ../search_space/Test3.json
 
-trialCommand: python3 run.py -m SASRec -d amazon-sports --mode tune
+trialCommand: python3 run.py -m Test3 -d yelp --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
@@ -22,11 +22,11 @@ tuner:                          # Configure the tuning algorithm.
 #     threshold: 0.9
 #     gap: 1
 
-# assessor:
-#   name: Medianstop
-#   classArgs:
-#     optimize_mode: maximize
-#     start_step: 200
+assessor:
+  name: Medianstop
+  classArgs:
+    optimize_mode: maximize
+    start_step: 150
 # Configure the training platform.
 # Supported platforms: local, remote, openpai, aml, kubeflow, kubernetes, adl.
 

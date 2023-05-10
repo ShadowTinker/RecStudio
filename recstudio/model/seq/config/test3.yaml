@@ -8,7 +8,7 @@ model:
   # Graph contrastive
   k: 2
   gnn_layers: 2
-  noise: 0.05
+  noise: 0.1
   temperature: 0.2
   cl_weight: 0.1
   augment_type: item_random # item_crop, item_mask, item_reorder, item_random
