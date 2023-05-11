@@ -18,13 +18,6 @@ class Test4(SASRec):
 
     def _get_item_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_items + 1, self.embed_dim, padding_idx=0) # the last item is mask
-    
-    def _get_train_loaders(self, train_data : dataset.SeqToSeqDataset, ddp=False) -> List:
-        train_loader = train_data.train_loader(batch_size = self.config['train']['batch_size'],
-                                                   shuffle = True, ddp=ddp)
-        adaption_train_loader = train_data.train_loader(batch_size = self.config['train']['batch_size'],
-                                                      shuffle = True, ddp=ddp)
-        return [train_loader, adaption_train_loader]
 
     def _get_query_encoder(self, train_data):
         model_config = self.config['model']
@@ -38,18 +31,41 @@ class Test4(SASRec):
             item_encoder=self.item_encoder
         )
 
-    def training_step(self, batch, loader_idx):
-        if loader_idx == 0:
+    def training_step(self, batch, adaption=False):
+        if not adaption:
             output = self.forward(batch, False)
             cl_output = self.augmentation_model(batch, self.item_encoder.weight[:-1], self.projection_head_train)
             cl_output2 = self.augmentation_model2(batch, self.query_encoder, self.projection_head_train)
             loss_value = self.loss_fn(batch[self.frating], **output['score']) \
-            + self.config['model']['gcl_weight'] * cl_output['cl_loss'] \
-            + self.config['model']['cl_weight'] * cl_output2['cl_loss']
-        elif loader_idx == 1:
+            + self.config['model']['gcl_weight'] * cl_output['cl_loss']
+        elif adaption:
             cl_output2 = self.augmentation_model2(batch, self.query_encoder, self.projection_head_test)
             loss_value = self.config['model']['cl_weight'] * cl_output2['cl_loss']
         return loss_value
 
-    def training_epoch(self, nepoch):
-        return super().training_epoch(nepoch)
+    def test_epoch(self, dataloader):
+        self.train()
+        trn_loader = self.trainloaders[0]
+        last_loss, patience_cnt = 99999, 0
+        while(True):
+            # TTA for 10 epochs
+            cur_loss = 0
+            for batch_idx, batch in enumerate(trn_loader):
+                # data to device
+                batch = self._to_device(batch, self._parameter_device)
+                self.optimizers[0]['optimizer'].zero_grad()
+                # model loss
+                training_step_args = {'batch': batch, 'adaption': True}
+                loss = self.training_step(**training_step_args)
+                loss.backward()
+                self.optimizers[0]['optimizer'].step()
+                cur_loss += loss.item()
+            if cur_loss < last_loss:
+                last_loss = cur_loss
+                patience_cnt = 0
+            else:
+                patience_cnt += 1
+            if patience_cnt >= 10:
+                break
+        self.eval()
+        return super().test_epoch(dataloader)

@@ -15,7 +15,8 @@ model:
   augment_type: item_random # item_crop, item_mask, item_reorder, item_random
 
 train:
+  epochs: 100
   batch_size: 256
   negative_count: 1
   init_method: normal
-  early_stop_patience: 40
+  early_stop_patience: 10
