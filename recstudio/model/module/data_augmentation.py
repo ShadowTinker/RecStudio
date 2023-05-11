@@ -628,13 +628,17 @@ class MyAugmentation(torch.nn.Module):
         emb = torch.stack(emb_list, dim=1).mean(1)
         return emb
 
-    def forward(self, batch, item_emb:torch.Tensor):
+    def forward(self, batch, item_emb:torch.Tensor, projection_head=None):
         output_dict = {}
         device = item_emb.device
 
         i_idx = torch.unique(batch[self.fiid]).to(device)
         item_all_vec1 = self.get_gnn_embeddings(item_emb, device)
         item_all_vec2 = self.get_gnn_embeddings(item_emb, device)
+        if projection_head != None:
+            item_all_vec1 = projection_head(item_all_vec1)
+            item_all_vec2 = projection_head(item_all_vec2)
+
 
         item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
 
@@ -759,7 +763,7 @@ class CL4SRecAugmentation(torch.nn.Module):
             raise ValueError(f"augmentation type: '{self.config['augment_type']}' is invalided")
         self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
 
-    def forward(self, batch, query_encoder:torch.nn.Module):
+    def forward(self, batch, query_encoder:torch.nn.Module, projection_head=None):
         output_dict = {}
         seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
         seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen'])
@@ -771,6 +775,10 @@ class CL4SRecAugmentation(torch.nn.Module):
         seq_augmented_j_out = query_encoder({"in_" + self.fiid: seq_augmented_j, "seqlen" : seq_augmented_j_len},\
             need_pooling=False) # [B, L, D]
         seq_augmented_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, pooling_type='mean') # [B, D]
+
+        if projection_head != None:
+            seq_augmented_i_out = projection_head(seq_augmented_i_out)
+            seq_augmented_j_out = projection_head(seq_augmented_j_out)
 
         cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out)
         output_dict['cl_loss'] = cl_loss
