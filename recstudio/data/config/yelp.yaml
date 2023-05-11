@@ -28,7 +28,7 @@ min_user_inter: 5
 min_item_inter: 5
 field_max_len: ~
 low_rating_threshold: 3
-max_seq_len: 20
+max_seq_len: 50
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
 network_feat_name: ~ #[[social.txt], [ml-100k.kg, ml-100k.link]]
