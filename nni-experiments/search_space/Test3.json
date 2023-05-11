@@ -15,6 +15,10 @@
         "_type": "choice",
         "_value": [0.1, 0.2, 0.5, 0.8, 1]
     },
+    "model/gcl_weight": {
+        "_type": "choice",
+        "_value": [0.1, 0.2, 0.5, 0.8, 1]
+    },
     "model/temperature": {
         "_type": "choice",
         "_value": [0.1, 0.2, 0.5, 1]

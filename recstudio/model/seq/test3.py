@@ -32,6 +32,6 @@ class Test3(SASRec):
         cl_output = self.augmentation_model(batch, self.item_encoder.weight[:-1])
         cl_output2 = self.augmentation_model2(batch, self.query_encoder)
         loss_value = self.loss_fn(batch[self.frating], **output['score']) \
-           + self.config['model']['cl_weight'] * cl_output['cl_loss'] \
+           + self.config['model']['gcl_weight'] * cl_output['cl_loss'] \
            + self.config['model']['cl_weight'] * cl_output2['cl_loss']
         return loss_value
