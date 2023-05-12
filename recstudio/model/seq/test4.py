@@ -37,19 +37,19 @@ class Test4(SASRec):
             cl_output = self.augmentation_model(batch, self.item_encoder.weight[:-1], self.projection_head_train)
             cl_output2 = self.augmentation_model2(batch, self.query_encoder, self.projection_head_train)
             loss_value = self.loss_fn(batch[self.frating], **output['score']) \
-            + self.config['model']['gcl_weight'] * cl_output['cl_loss']
+                + self.config['model']['gcl_weight'] * cl_output['cl_loss']
         elif adaption:
+            output = self.forward(batch, False)
             cl_output2 = self.augmentation_model2(batch, self.query_encoder, self.projection_head_test)
-            loss_value = self.config['model']['cl_weight'] * cl_output2['cl_loss']
+            loss_value = self.loss_fn(batch[self.frating], **output['score']) \
+                + self.config['model']['cl_weight'] * cl_output2['cl_loss']
         return loss_value
 
     def test_epoch(self, dataloader):
         self.train()
         trn_loader = self.trainloaders[0]
-        last_loss, patience_cnt = 99999, 0
-        while(True):
+        for _ in range(10):
             # TTA for 10 epochs
-            cur_loss = 0
             for batch_idx, batch in enumerate(trn_loader):
                 # data to device
                 batch = self._to_device(batch, self._parameter_device)
@@ -59,13 +59,5 @@ class Test4(SASRec):
                 loss = self.training_step(**training_step_args)
                 loss.backward()
                 self.optimizers[0]['optimizer'].step()
-                cur_loss += loss.item()
-            if cur_loss < last_loss:
-                last_loss = cur_loss
-                patience_cnt = 0
-            else:
-                patience_cnt += 1
-            if patience_cnt >= 10:
-                break
         self.eval()
         return super().test_epoch(dataloader)
