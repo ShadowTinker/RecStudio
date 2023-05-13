@@ -8,6 +8,7 @@ import copy
 import pickle
 import scipy.sparse as sp
 import numpy as np
+import torch.nn as nn
 from typing import Optional, Union
 import torch.nn.functional as F
 from dgl.nn.pytorch.conv import GraphConv
@@ -645,6 +646,22 @@ class MyAugmentation(torch.nn.Module):
         output_dict['cl_loss'] = item_cl_loss
 
         return output_dict
+
+class GSLAugmentation(MyAugmentation):
+    def __init__(self, config, train_data) -> None:
+        super().__init__(config, train_data)
+        self.US = nn.Linear(self.num_items, config['embed_dim'], bias=False)
+        self.V = nn.Linear(self.num_items, config['embed_dim'], bias=False)
+        
+    def get_gnn_embeddings(self, emb, device):
+        self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
+        emb_list = [emb]
+        for idx in range(self.gnn_layers):
+            emb = self.gnn_conv(self.g, emb)
+            emb = emb + self.noise * self.US.weight.T @ (self.V.weight @ emb)
+            emb_list.append(emb)
+        emb = torch.stack(emb_list, dim=1).mean(1)
+        return emb
 
 class MyAugmentation2(torch.nn.Module):
 
