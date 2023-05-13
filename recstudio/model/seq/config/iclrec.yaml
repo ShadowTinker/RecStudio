@@ -23,7 +23,6 @@ model:
 train:
   batch_size: 256
   epochs: 1000
-  early_stop_patience: 40
   init_method: normal
   negative_count: 1
   warm_up_epoches: 0 # number of epochs to start IntentCL.

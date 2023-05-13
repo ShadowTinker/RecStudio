@@ -10,4 +10,3 @@ train:
   batch_size: 256
   negative_count: 1
   init_method: normal
-  early_stop_patience: 40
