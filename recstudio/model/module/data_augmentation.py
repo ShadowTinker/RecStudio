@@ -653,15 +653,34 @@ class GSLAugmentation(MyAugmentation):
         self.US = nn.Linear(self.num_items, config['embed_dim'], bias=False)
         self.V = nn.Linear(self.num_items, config['embed_dim'], bias=False)
         
-    def get_gnn_embeddings(self, emb, device):
+    def get_gnn_embeddings(self, emb, device, noise=True):
         self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
         emb_list = [emb]
         for idx in range(self.gnn_layers):
             emb = self.gnn_conv(self.g, emb)
-            emb = emb + self.noise * self.US.weight.T @ (self.V.weight @ emb)
+            if noise:
+                emb = emb + self.noise * self.US.weight.T @ (self.V.weight @ emb)
             emb_list.append(emb)
         emb = torch.stack(emb_list, dim=1).mean(1)
         return emb
+    
+    def forward(self, batch, item_emb:torch.Tensor, projection_head=None):
+        output_dict = {}
+        device = item_emb.device
+
+        i_idx = torch.unique(batch[self.fiid]).to(device)
+        item_all_vec1 = self.get_gnn_embeddings(item_emb, device)
+        item_all_vec2 = self.get_gnn_embeddings(item_emb, device, noise=False)
+        if projection_head != None:
+            item_all_vec1 = projection_head(item_all_vec1)
+            item_all_vec2 = projection_head(item_all_vec2)
+
+
+        item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
+
+        output_dict['cl_loss'] = item_cl_loss
+
+        return output_dict
 
 class MyAugmentation2(torch.nn.Module):
 
