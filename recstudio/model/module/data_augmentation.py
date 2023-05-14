@@ -652,25 +652,54 @@ class GSLAugmentation(MyAugmentation):
         super().__init__(config, train_data)
         self.US = nn.Linear(self.num_items, config['embed_dim'], bias=False)
         self.V = nn.Linear(self.num_items, config['embed_dim'], bias=False)
+        # self.US = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
+        # self.V = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
+        self.ratio = 0.999
         
+    def reparameterize(self, mu, logvar):
+        if self.training:
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
     def get_gnn_embeddings(self, emb, device, noise=True):
         self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
         emb_list = [emb]
         for idx in range(self.gnn_layers):
             emb = self.gnn_conv(self.g, emb)
             if noise:
+                # US_mean, US_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.US.weight.T), 2, -1)
+                # US = self.reparameterize(US_mean, US_logvar)
+                # self.kl_loss = self.kl_loss + self.kl_loss_func(US_mean, US_logvar)
+                # V_mean, V_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.V.weight.T), 2, -1)
+                # V = self.reparameterize(V_mean, V_logvar)
+                # self.kl_loss = self.kl_loss + self.kl_loss_func(V_mean, V_logvar)
+
+                # US = torch.sparse.mm(self.norm_adj, self.US.weight.T)
+                # V = torch.sparse.mm(self.norm_adj, self.V.weight.T)
+
+                # emb = emb + self.noise * US @ (V.T @ emb)
+                # emb = emb + self.noise * US @ (V.T @ emb) * (1 - self.ratio)
                 emb = emb + self.noise * self.US.weight.T @ (self.V.weight @ emb)
+                self.ratio = self.ratio * 0.999
             emb_list.append(emb)
         emb = torch.stack(emb_list, dim=1).mean(1)
         return emb
     
+    def kl_loss_func(self, mu, logvar):
+        KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
+        return KLD
+
     def forward(self, batch, item_emb:torch.Tensor, projection_head=None):
         output_dict = {}
         device = item_emb.device
 
         i_idx = torch.unique(batch[self.fiid]).to(device)
+        self.kl_loss = 0
         item_all_vec1 = self.get_gnn_embeddings(item_emb, device)
-        item_all_vec2 = self.get_gnn_embeddings(item_emb, device, noise=False)
+        item_all_vec2 = self.get_gnn_embeddings(item_emb, device)
         if projection_head != None:
             item_all_vec1 = projection_head(item_all_vec1)
             item_all_vec2 = projection_head(item_all_vec2)
