@@ -747,16 +747,16 @@ class GSLAugmentation3(GSLAugmentation):
             V = torch.sparse.mm(self.norm_adj, self.V.weight.T)
         emb_list = [emb]
         for idx in range(self.gnn_layers):
-            # Case 1
-            if not noise:
-                emb = self.gnn_conv(self.g, emb)
-            else:
-                emb = US @ (V.T @ emb)
+            # ----Case 1----
+            # if not noise:
+            #     emb = self.gnn_conv(self.g, emb)
+            # else:
+            #     emb = US @ (V.T @ emb)
 
-            # Case 2
-            # emb = self.gnn_conv(self.g, emb)
-            # if noise:
-            #     emb = emb + self.noise * US @ (V.T @ emb)
+            # ----Case 2----
+            emb = self.gnn_conv(self.g, emb)
+            if noise:
+                emb = emb + self.noise * US @ (V.T @ emb)
             
             emb_list.append(emb)
         emb = torch.stack(emb_list, dim=1).mean(1)
