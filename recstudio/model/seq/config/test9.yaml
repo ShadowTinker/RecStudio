@@ -12,6 +12,7 @@ model:
   temperature: 0.2
   gcl_weight: 0.1
   cl_weight: 0.1
+  kl_weight: 0.001
   augment_type: item_random # item_crop, item_mask, item_reorder, item_random
 
 train:

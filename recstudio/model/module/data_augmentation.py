@@ -726,15 +726,23 @@ class GSLAugmentation3(GSLAugmentation):
 
     def __init__(self, config, train_data) -> None:
         super().__init__(config, train_data)
-        self.US = nn.Linear(self.num_items, config['embed_dim'] * 4, bias=False)
-        self.V = nn.Linear(self.num_items, config['embed_dim'] * 4, bias=False)
+        self.embed_dim = config['embed_dim']
+        self.US = nn.Linear(self.num_items, self.embed_dim * 4, bias=False)
+        self.V = nn.Linear(self.num_items, self.embed_dim * 4, bias=False)
         # self.US = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
         # self.V = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
         # self.VAE = nn.Linear(config['embed_dim'], config['embed_dim'] * 2)
         self.kl_loss = 0
+        self.get_svd()
+
+    def get_svd(self):
+        U, S, V = torch.svd_lowrank(self.norm_adj.to_dense(), self.embed_dim * 4)
+        self.real_US = U @ torch.diag(S)
+        self.real_V = V
         
     def get_gnn_embeddings(self, emb, device, noise=True):
         self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
+        self.real_US, self.real_V = self.real_US.to(device), self.real_V.to(device)
         if noise:
             # US_mean, US_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.US.weight.T), 2, -1)
             # US = self.reparameterize(US_mean, US_logvar)
@@ -745,6 +753,8 @@ class GSLAugmentation3(GSLAugmentation):
 
             US = torch.sparse.mm(self.norm_adj, self.US.weight.T)
             V = torch.sparse.mm(self.norm_adj, self.V.weight.T)
+            self.kl_loss = self.kl_loss + ((US - self.real_US) ** 2).sum()
+            self.kl_loss = self.kl_loss + ((V - self.real_V) ** 2).sum()
         emb_list = [emb]
         for idx in range(self.gnn_layers):
             # ----Case 1----
@@ -762,7 +772,14 @@ class GSLAugmentation3(GSLAugmentation):
         emb = torch.stack(emb_list, dim=1).mean(1)
         return emb
     
+    def l2_reg_loss_fn(self, *args):
+        loss = 0.
+        for emb in args:
+            loss = loss + torch.mean(torch.sum(emb * emb, dim=-1)) # [B, D] -> [B] -> []
+        return loss
+
     def forward(self, batch, item_emb:torch.Tensor, projection_head=None):
+        self.kl_loss = 0
         output_dict = {}
         device = item_emb.device
 
