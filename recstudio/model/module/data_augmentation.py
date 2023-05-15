@@ -650,10 +650,12 @@ class MyAugmentation(torch.nn.Module):
 class GSLAugmentation(MyAugmentation):
     def __init__(self, config, train_data) -> None:
         super().__init__(config, train_data)
-        self.US = nn.Linear(self.num_items, config['embed_dim'], bias=False)
-        self.V = nn.Linear(self.num_items, config['embed_dim'], bias=False)
+        # self.US = nn.Linear(self.num_items, config['embed_dim'], bias=False)
+        # self.V = nn.Linear(self.num_items, config['embed_dim'], bias=False)
         # self.US = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
         # self.V = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
+        self.VAE = nn.Linear(config['embed_dim'], config['embed_dim'] * 2)
+        self.kl_loss = 0
         self.ratio = 0.999
         
     def reparameterize(self, mu, logvar):
@@ -679,10 +681,18 @@ class GSLAugmentation(MyAugmentation):
 
                 # US = torch.sparse.mm(self.norm_adj, self.US.weight.T)
                 # V = torch.sparse.mm(self.norm_adj, self.V.weight.T)
-
                 # emb = emb + self.noise * US @ (V.T @ emb)
                 # emb = emb + self.noise * US @ (V.T @ emb) * (1 - self.ratio)
-                emb = emb + self.noise * self.US.weight.T @ (self.V.weight @ emb)
+
+                # VAE noise
+                mu, logvar = self.VAE(emb).tensor_split(2, dim=-1)
+                emb = emb + self.noise * self.reparameterize(mu, logvar)
+                self.kl_loss = self.kl_loss + self.kl_loss_func(mu, logvar)
+
+                # Random
+                # random_noise = torch.rand_like(emb, device=device)
+                # emb += torch.sign(emb) * F.normalize(random_noise, dim=-1) * self.noise
+
                 self.ratio = self.ratio * 0.999
             emb_list.append(emb)
         emb = torch.stack(emb_list, dim=1).mean(1)
@@ -699,7 +709,7 @@ class GSLAugmentation(MyAugmentation):
         i_idx = torch.unique(batch[self.fiid]).to(device)
         self.kl_loss = 0
         item_all_vec1 = self.get_gnn_embeddings(item_emb, device)
-        item_all_vec2 = self.get_gnn_embeddings(item_emb, device)
+        item_all_vec2 = self.get_gnn_embeddings(item_emb, device, False)
         if projection_head != None:
             item_all_vec1 = projection_head(item_all_vec1)
             item_all_vec2 = projection_head(item_all_vec2)
@@ -708,51 +718,159 @@ class GSLAugmentation(MyAugmentation):
         item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
 
         output_dict['cl_loss'] = item_cl_loss
+        output_dict['kl_loss'] = self.kl_loss
 
         return output_dict
 
-class MyAugmentation2(torch.nn.Module):
+class GSLAugmentation3(GSLAugmentation):
 
-    def __init__(self, config, train_data, g, gnn_conv) -> None:
-        super().__init__()
-        self.config = config
-        self.fuid = train_data.fuid
-        self.fiid = train_data.fiid
-        self.num_users = train_data.num_users
-        self.num_items = train_data.num_items
-        self.k = self.config['k']
-        self.gnn_layers = self.config['gnn_layers']
-        self.noise = self.config['noise']
-        self.gnn_conv = gnn_conv
-        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='cosine')
-        self.g = g
-
-    def update_graph(self, g):
-        self.g = g
-
+    def __init__(self, config, train_data) -> None:
+        super().__init__(config, train_data)
+        self.US = nn.Linear(self.num_items, config['embed_dim'] * 4, bias=False)
+        self.V = nn.Linear(self.num_items, config['embed_dim'] * 4, bias=False)
+        # self.US = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
+        # self.V = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
+        # self.VAE = nn.Linear(config['embed_dim'], config['embed_dim'] * 2)
+        self.kl_loss = 0
+        
     def get_gnn_embeddings(self, emb, device, noise=True):
         self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
+        if noise:
+            # US_mean, US_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.US.weight.T), 2, -1)
+            # US = self.reparameterize(US_mean, US_logvar)
+            # self.kl_loss = self.kl_loss + self.kl_loss_func(US_mean, US_logvar)
+            # V_mean, V_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.V.weight.T), 2, -1)
+            # V = self.reparameterize(V_mean, V_logvar)
+            # self.kl_loss = self.kl_loss + self.kl_loss_func(V_mean, V_logvar)
+
+            US = torch.sparse.mm(self.norm_adj, self.US.weight.T)
+            V = torch.sparse.mm(self.norm_adj, self.V.weight.T)
         emb_list = [emb]
-        for layer in self.gnn_conv:
-            emb = layer(self.g, emb)
-            if noise:
-                random_noise = torch.rand_like(emb, device=device)
-                emb += torch.sign(emb) * F.normalize(random_noise, dim=-1) * self.noise
+        for idx in range(self.gnn_layers):
+            # Case 1
+            if not noise:
+                emb = self.gnn_conv(self.g, emb)
+            else:
+                emb = US @ (V.T @ emb)
+
+            # Case 2
+            # emb = self.gnn_conv(self.g, emb)
+            # if noise:
+            #     emb = emb + self.noise * US @ (V.T @ emb)
+            
             emb_list.append(emb)
         emb = torch.stack(emb_list, dim=1).mean(1)
         return emb
-
-    def forward(self, batch, item_emb:torch.nn.Embedding):
+    
+    def forward(self, batch, item_emb:torch.Tensor, projection_head=None):
         output_dict = {}
-        device = item_emb.weight.device
+        device = item_emb.device
 
         i_idx = torch.unique(batch[self.fiid]).to(device)
-        item_all_vec1 = self.get_gnn_embeddings(item_emb.weight, device)
-        item_all_vec2 = self.get_gnn_embeddings(item_emb.weight, device)
+        self.kl_loss = 0
+        item_all_vec1 = self.get_gnn_embeddings(item_emb, device)
+        item_all_vec2 = self.get_gnn_embeddings(item_emb, device, False)
+        if projection_head != None:
+            item_all_vec1 = projection_head(item_all_vec1)
+            item_all_vec2 = projection_head(item_all_vec2)
+
 
         item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
 
         output_dict['cl_loss'] = item_cl_loss
+        output_dict['kl_loss'] = self.kl_loss
+
+        return output_dict
+
+class SpectralAugmentation(torch.nn.Module):
+    
+    def __init__(self, config, train_data) -> None:
+        super().__init__()
+        self.config = config
+        self.fiid = train_data.fiid
+        self.noise = config['noise_seq']
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
+
+    def forward(self, batch, query_encoder:torch.nn.Module, projection_head=None):
+        output_dict = {}
+        seqlen = batch['seqlen']
+
+        seq_augmented_i_out = query_encoder(batch, need_pooling=False, noise=self.noise) # [B, L, D]
+        seq_augmented_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seqlen, pooling_type='mean') # [B, D]
+
+        seq_augmented_j_out = query_encoder(batch, need_pooling=False, noise=self.noise) # [B, L, D]
+        seq_augmented_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seqlen, pooling_type='mean') # [B, D]
+
+        if projection_head != None:
+            seq_augmented_i_out = projection_head(seq_augmented_i_out)
+            seq_augmented_j_out = projection_head(seq_augmented_j_out)
+
+        cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out)
+        output_dict['cl_loss'] = cl_loss
+        return output_dict
+
+class GSL2Augmentation(torch.nn.Module):
+
+    def __init__(self, config, train_data) -> None:
+        super().__init__()
+        self.config = config
+        self.fiid = train_data.fiid
+        if self.config['augment_type'] == 'item_crop':
+            self.augmentation = Item_Crop()
+        elif self.config['augment_type'] == 'item_mask':
+            self.augmentation = Item_Mask(mask_id=train_data.num_items)
+        elif self.config['augment_type'] == 'item_reorder':
+            self.augmentation = Item_Reorder()
+        elif self.config['augment_type'] == 'item_random':
+            self.augmentation = Item_Random(mask_id=train_data.num_items)
+        else:
+            raise ValueError(f"augmentation type: '{self.config['augment_type']}' is invalided")
+
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
+
+        if self.config['intent_seq_representation_type'] == 'concat':
+            self.cluster = faiss.Kmeans(d=self.config['embed_dim'] * self.config['max_seq_len'], k=self.config['num_intent_clusters'], gpu=False)
+        else:
+            self.cluster = faiss.Kmeans(d=self.config['embed_dim'], k=self.config['num_intent_clusters'], gpu=False)
+        self.centroids = None
+
+    @torch.no_grad()
+    def train_kmeans(self, item_embed, device):
+        # intentions clustering
+        self.cluster.train(item_embed.cpu().numpy())
+        self.centroids = torch.from_numpy(self.cluster.centroids).to(device)
+
+    def forward(self, batch, item_embed:torch.Tensor, query_encoder:torch.nn.Module):
+        output_dict = {}
+        # augmented sequence representation without pooling.
+        # Because instance CL and Intent CL may use different pooling operations, we perform pooling operations in specific CL tasks.
+        seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_'+self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
+        seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_'+self.fiid], batch['seqlen'])
+        seq_augmented_i_out = query_encoder({"in_"+self.fiid : seq_augmented_i, "seqlen" : seq_augmented_i_len}, \
+            need_pooling=False) # [B, L, D]
+        seq_augmented_j_out = query_encoder({"in_"+self.fiid : seq_augmented_j, "seqlen" : seq_augmented_j_len}, \
+            need_pooling=False) # [B, L, D]
+
+        # Instance CL
+        instance_seq_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, \
+            pooling_type=self.config['instance_seq_representation_type']) # [B, L * D] or [B, D]
+        instance_seq_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, \
+            pooling_type=self.config['instance_seq_representation_type']) # [B, L * D]
+        instance_loss = self.InfoNCE_loss_fn(instance_seq_i_out, instance_seq_j_out) # [B, 2B]
+        instance_loss_rev = self.InfoNCE_loss_fn(instance_seq_j_out, instance_seq_i_out)
+
+        # Intent CL
+        row, col = batch['in_'+self.fiid].nonzero().T
+        item_seq = batch['in_'+self.fiid][row, col]
+        item_seq = item_embed[item_seq]
+        _, intent_ids = self.cluster.index.search(item_seq.cpu().detach().numpy(), 1)
+        seq2intents = self.centroids[intent_ids.squeeze(-1)]
+
+        intent_ids = torch.from_numpy(intent_ids.squeeze(-1)).to(item_seq.device)
+        intent_loss_i = self.InfoNCE_loss_fn(item_seq, seq2intents, instance_labels=intent_ids)
+
+        output_dict['instance_cl_loss'] = 0.5 * (instance_loss + instance_loss_rev)
+        output_dict['intent_cl_loss'] = 0.5 * (intent_loss_i)
 
         return output_dict
 

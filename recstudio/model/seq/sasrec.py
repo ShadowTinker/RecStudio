@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from recstudio.ann import sampler
 from recstudio.data import dataset
 from recstudio.model.module import functional as recfn

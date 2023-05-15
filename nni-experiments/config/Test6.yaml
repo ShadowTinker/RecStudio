@@ -1,11 +1,11 @@
-experimentName: Test6-amazon-toys
+experimentName: Test6-amazon-beauty
 searchSpaceFile: ../search_space/Test6.json
 
-trialCommand: python3 run.py -m Test6 -d amazon-toys --mode tune
+trialCommand: python3 run.py -m Test6 -d amazon-beauty --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
-trialConcurrency: 12            # Run 4 trials concurrently.
+trialConcurrency: 4            # Run 4 trials concurrently.
 maxTrialNumber: 1000              # Generate at most 10 trials.
 maxExperimentDuration: 100d       # Stop generating trials after 1 hour.
 
@@ -26,7 +26,7 @@ assessor:
   name: Medianstop
   classArgs:
     optimize_mode: maximize
-    start_step: 50
+    start_step: 150
 # Configure the training platform.
 # Supported platforms: local, remote, openpai, aml, kubeflow, kubernetes, adl.
 
@@ -34,4 +34,4 @@ trainingService:
   platform: local
   useActiveGpu: true
   gpuIndices: 0,1,2,3
-  maxTrialNumberPerGpu: 3
+  maxTrialNumberPerGpu: 1

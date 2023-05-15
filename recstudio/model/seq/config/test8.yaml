@@ -9,11 +9,10 @@ model:
   k: 2
   gnn_layers: 2
   noise: 0.1
+  noise_seq: 0.5
   temperature: 0.2
   gcl_weight: 0.1
   cl_weight: 0.1
-  kl_weight: 200
-  augment_type: item_random # item_crop, item_mask, item_reorder, item_random
 
 train:
   batch_size: 256

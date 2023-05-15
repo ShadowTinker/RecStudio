@@ -9,15 +9,15 @@
     },
     "model/noise": {
         "_type": "choice",
-        "_value": [0.1, 0.2, 0.5, 1]
+        "_value": [0.1, 0.2, 0.5]
     },
     "model/cl_weight": {
         "_type": "choice",
-        "_value": [0.1, 0.2, 0.5, 1]
+        "_value": [0.1, 0.2, 0.5]
     },
     "model/gcl_weight": {
         "_type": "choice",
-        "_value": [0.1, 0.2, 0.5, 1]
+        "_value": [0.1, 0.2, 0.5]
     },
     "model/temperature": {
         "_type": "choice",

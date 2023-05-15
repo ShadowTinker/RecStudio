@@ -3,10 +3,10 @@ from recstudio.data import dataset
 from recstudio.model.module import data_augmentation
 from recstudio.model.seq.sasrec import SASRec, SASRecQueryEncoder
 
-class Test6(SASRec):
+class Test9(SASRec):
     def _init_model(self, train_data):
         super()._init_model(train_data)
-        self.augmentation_model = data_augmentation.GSLAugmentation(self.config['model'], train_data)
+        self.augmentation_model = data_augmentation.GSLAugmentation3(self.config['model'], train_data)
         self.augmentation_model2 = data_augmentation.CL4SRecAugmentation(self.config['model'], train_data)
 
     def _get_dataset_class():
@@ -33,6 +33,5 @@ class Test6(SASRec):
         cl_output2 = self.augmentation_model2(batch, self.query_encoder)
         loss_value = self.loss_fn(batch[self.frating], **output['score']) \
            + self.config['model']['gcl_weight'] * cl_output['cl_loss'] \
-           + self.config['model']['cl_weight'] * cl_output2['cl_loss'] \
-           + self.config['model']['kl_weight'] * cl_output['kl_loss']
+           + self.config['model']['cl_weight'] * cl_output2['cl_loss']
         return loss_value
