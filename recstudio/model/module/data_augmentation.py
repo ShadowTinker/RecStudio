@@ -722,6 +722,118 @@ class GSLAugmentation(MyAugmentation):
 
         return output_dict
 
+class GSLAugmentation4(GSLAugmentation):
+    # User graph
+    def __init__(self, config, train_data) -> None:
+        super().__init__(config, train_data)
+        self.embed_dim = config['embed_dim']
+        self.US = nn.Linear(self.num_users, self.embed_dim * 4, bias=False)
+        self.V = nn.Linear(self.num_users, self.embed_dim * 4, bias=False)
+        # self.US = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
+        # self.V = nn.Linear(self.num_items, config['embed_dim'] * 2, bias=False)
+        # self.VAE = nn.Linear(config['embed_dim'], config['embed_dim'] * 2)
+        self.n_user = train_data.num_users
+        self.kl_loss = 0
+        self.get_user_graph(train_data.get_graph(0)[0])
+        self.get_svd()
+
+    def get_user_graph(self, interaction_matrix):
+        A = interaction_matrix @ interaction_matrix.T
+        A = A.multiply(A > 1) # filter out possible noisy labels
+        A = A.tocoo()
+        degree = np.array((A > 0).sum(1)).flatten() + 1e-7
+        degree = np.power(degree, -0.5)
+        degree = sp.diags(degree)
+        norm_adj = (degree * A * degree).tocoo()
+        g = dgl.from_scipy(norm_adj)
+        g.edata['weight'] = torch.tensor(norm_adj.data)
+        self.g = g
+        norm_adj = torch.sparse_coo_tensor(
+            np.row_stack([norm_adj.row, norm_adj.col]),
+            norm_adj.data,
+            (self.n_user, self.n_user),
+            dtype=torch.float32
+        )
+        self.norm_adj = norm_adj
+
+    def get_svd(self):
+        U, S, V = torch.svd_lowrank(self.norm_adj.to_dense(), self.embed_dim * 4)
+        self.real_US = U @ torch.diag(S)
+        self.real_V = V
+        
+    def get_gnn_embeddings(self, emb, device, noise=True):
+        self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
+        self.real_US, self.real_V = self.real_US.to(device), self.real_V.to(device)
+        if noise:
+            # US_mean, US_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.US.weight.T), 2, -1)
+            # US = self.reparameterize(US_mean, US_logvar)
+            # self.kl_loss = self.kl_loss + self.kl_loss_func(US_mean, US_logvar)
+            # V_mean, V_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.V.weight.T), 2, -1)
+            # V = self.reparameterize(V_mean, V_logvar)
+            # self.kl_loss = self.kl_loss + self.kl_loss_func(V_mean, V_logvar)
+
+            US = torch.sparse.mm(self.norm_adj, self.US.weight.T)
+            V = torch.sparse.mm(self.norm_adj, self.V.weight.T)
+            US, V = self.real_US, self.real_V
+            # self.kl_loss = self.kl_loss + ((US - self.real_US) ** 2).sum()
+            # self.kl_loss = self.kl_loss + ((V - self.real_V) ** 2).sum()
+        emb_list = [emb]
+        for idx in range(self.gnn_layers):
+            # # ----Case 1----
+            # if not noise:
+            #     emb = self.gnn_conv(self.g, emb)
+            # else:
+            #     emb = US @ (V.T @ emb)
+
+            # ----Case 2----
+            emb = self.gnn_conv(self.g, emb)
+            if noise:
+                emb = emb + self.noise * US @ (V.T @ emb)
+            
+            emb_list.append(emb)
+        emb = torch.stack(emb_list, dim=1).mean(1)
+        return emb
+
+    @torch.no_grad()
+    def train_kmeans(self, query_encoder, trainloader, device):
+        # intentions clustering
+        kmeans_training_data = []
+        for batch_idx, batch in enumerate(trainloader):
+            batch = Recommender._to_device(batch, device)
+            seq_out = query_encoder(batch, need_pooling=False)
+            seq_out = recfn.seq_pooling_function(seq_out, batch['seqlen'], pooling_type=self.config['intent_seq_representation_type'])
+            kmeans_training_data.append(seq_out) # [B, D]
+
+        kmeans_training_data = torch.cat(kmeans_training_data, dim=0)
+        self.cluster.train(kmeans_training_data.cpu().numpy())
+        self.centroids = torch.from_numpy(self.cluster.centroids).to(device)    
+
+    def l2_reg_loss_fn(self, *args):
+        loss = 0.
+        for emb in args:
+            loss = loss + torch.mean(torch.sum(emb * emb, dim=-1)) # [B, D] -> [B] -> []
+        return loss
+
+    def forward(self, batch, query_embed:torch.Tensor, projection_head=None):
+        self.kl_loss = 0
+        output_dict = {}
+        device = query_embed.device
+
+        u_idx = torch.unique(batch[self.fuid]).to(device)
+        self.kl_loss = 0
+        user_all_vec1 = self.get_gnn_embeddings(query_embed, device)
+        user_all_vec2 = self.get_gnn_embeddings(query_embed, device, False)
+        if projection_head != None:
+            item_all_vec1 = projection_head(item_all_vec1)
+            item_all_vec2 = projection_head(item_all_vec2)
+
+        item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
+
+        output_dict['cl_loss'] = item_cl_loss
+        output_dict['kl_loss'] = self.kl_loss
+
+        return output_dict
+
 class GSLAugmentation3(GSLAugmentation):
 
     def __init__(self, config, train_data) -> None:
