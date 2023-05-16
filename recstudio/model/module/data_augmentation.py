@@ -757,7 +757,7 @@ class GSLAugmentation3(GSLAugmentation):
             self.kl_loss = self.kl_loss + ((V - self.real_V) ** 2).sum()
         emb_list = [emb]
         for idx in range(self.gnn_layers):
-            # ----Case 1----
+            # # ----Case 1----
             # if not noise:
             #     emb = self.gnn_conv(self.g, emb)
             # else:
@@ -791,47 +791,6 @@ class GSLAugmentation3(GSLAugmentation):
             item_all_vec1 = projection_head(item_all_vec1)
             item_all_vec2 = projection_head(item_all_vec2)
 
-
-        item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
-
-        output_dict['cl_loss'] = item_cl_loss
-        output_dict['kl_loss'] = self.kl_loss
-
-        return output_dict
-
-class GSLAugmentation4(GSLAugmentation):
-
-    def __init__(self, config, train_data) -> None:
-        super().__init__(config, train_data)
-        self.embed_dim = config['embed_dim']
-        self.kl_loss = 0
-        self.US = torch.load('./US.pth', map_location='cpu')
-        self.V = torch.load('./V.pth', map_location='cpu')
-        
-    def get_gnn_embeddings(self, emb, device, noise=True):
-        self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
-        if noise:
-            US = self.US.to(device)
-            V = self.V.to(device)
-        emb_list = [emb]
-        for idx in range(self.gnn_layers):
-            emb = self.gnn_conv(self.g, emb)
-            if noise:
-                emb = emb + self.noise * US @ (V.T @ emb)
-            
-            emb_list.append(emb)
-        emb = torch.stack(emb_list, dim=1).mean(1)
-        return emb
-
-    def forward(self, batch, item_emb:torch.Tensor):
-        self.kl_loss = 0
-        output_dict = {}
-        device = item_emb.device
-
-        i_idx = torch.unique(batch[self.fiid]).to(device)
-        self.kl_loss = 0
-        item_all_vec1 = self.get_gnn_embeddings(item_emb, device)
-        item_all_vec2 = self.get_gnn_embeddings(item_emb, device, False)
 
         item_cl_loss = self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
 

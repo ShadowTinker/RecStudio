@@ -1,11 +1,11 @@
-experimentName: Test9-amazon-beauty
+experimentName: Test9-amazon-sports
 searchSpaceFile: ../search_space/Test9.json
 
-trialCommand: python3 run.py -m Test9 -d amazon-beauty --mode tune
+trialCommand: python3 run.py -m Test9 -d amazon-sports --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
-trialConcurrency: 8            # Run 4 trials concurrently.
+trialConcurrency: 4            # Run 4 trials concurrently.
 maxTrialNumber: 1000              # Generate at most 10 trials.
 maxExperimentDuration: 100d       # Stop generating trials after 1 hour.
 
@@ -33,5 +33,5 @@ assessor:
 trainingService:
   platform: local
   useActiveGpu: true
-  gpuIndices: 0,1,2,3,4,5,6,7
-  maxTrialNumberPerGpu: 1
+  gpuIndices: 0,1
+  maxTrialNumberPerGpu: 2

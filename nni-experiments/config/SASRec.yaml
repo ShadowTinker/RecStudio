@@ -1,7 +1,7 @@
-experimentName: SASRec-amazon-sports
+experimentName: SASRec-amazon-toys
 searchSpaceFile: ../search_space/SASRec.json
 
-trialCommand: python3 run.py -m SASRec -d amazon-sports --mode tune
+trialCommand: python3 run.py -m SASRec -d amazon-toys --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
