@@ -1,0 +1,37 @@
+experimentName: Test11-amazon-beauty
+searchSpaceFile: ../search_space/Test11.json
+
+trialCommand: python3 run.py -m Test11 -d amazon-beauty --mode tune
+trialCodeDirectory: ../..
+trialGpuNumber: 1
+
+trialConcurrency: 8            # Run 4 trials concurrently.
+maxTrialNumber: 1000              # Generate at most 10 trials.
+maxExperimentDuration: 100d       # Stop generating trials after 1 hour.
+
+tuner:                          # Configure the tuning algorithm.
+  name: TPE
+  classArgs:
+    optimize_mode: maximize
+
+# assessor:
+#   name: Curvefitting
+#   classArgs:
+#     epoch_num: 200
+#     start_step: 20
+#     threshold: 0.9
+#     gap: 1
+
+assessor:
+  name: Medianstop
+  classArgs:
+    optimize_mode: maximize
+    start_step: 150
+# Configure the training platform.
+# Supported platforms: local, remote, openpai, aml, kubeflow, kubernetes, adl.
+
+trainingService:
+  platform: local
+  useActiveGpu: true
+  gpuIndices: 0,1,2,3,4,5,6,7
+  maxTrialNumberPerGpu: 1
