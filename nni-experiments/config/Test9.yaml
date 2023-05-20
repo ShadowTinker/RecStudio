@@ -5,7 +5,7 @@ trialCommand: python3 run.py -m Test9 -d amazon-toys --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
-trialConcurrency: 2            # Run 4 trials concurrently.
+trialConcurrency: 6            # Run 4 trials concurrently.
 maxTrialNumber: 1000              # Generate at most 10 trials.
 maxExperimentDuration: 100d       # Stop generating trials after 1 hour.
 
@@ -33,5 +33,5 @@ assessor:
 trainingService:
   platform: local
   useActiveGpu: true
-  gpuIndices: 0,1
+  gpuIndices: 0,1,2,3,4,5
   maxTrialNumberPerGpu: 1
