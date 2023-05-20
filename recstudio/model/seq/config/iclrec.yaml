@@ -6,7 +6,7 @@ eval:
 model:
   # transformer
   hidden_size: 256
-  layer_num: 2
+  layer_num: 1
   head_num: 2
   dropout_rate: 0.5
   activation: 'gelu'
@@ -14,13 +14,14 @@ model:
   # contrastive learning
   temperature: 1.0
   augment_type: item_random # item_crop, item_mask, item_reorder, item_random
-  cl_weight: 0.6
-  intent_cl_weight: 0.2
+  cl_weight: 0.1
+  intent_cl_weight: 0.1
   num_intent_clusters: 256
   intent_seq_representation_type: 'mean'
   instance_seq_representation_type: 'mean'
 
 train:
+  early_stop_patience: 40
   batch_size: 256
   epochs: 1000
   init_method: normal

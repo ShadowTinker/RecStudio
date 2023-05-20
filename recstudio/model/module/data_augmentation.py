@@ -89,6 +89,46 @@ class Item_Reorder(torch.nn.Module):
 
         return torch.stack(reordered_sequences, dim=0), seq_lens
 
+class Item_Expand(torch.nn.Module):
+    def __init__(self, max_seq_len, n_head, fiid) -> None:
+        super().__init__()
+        self.fiid = fiid
+        self.max_seq_len = max_seq_len
+        self.n_head = n_head
+
+    def forward(self, sequences, seq_lens, g):
+        device = sequences.device
+        sequences, seq_lens = sequences.cpu(), seq_lens.cpu()
+        batch_size = sequences.size(0)
+
+        augmented_sequences = []
+        max_len = seq_lens.max() * 2
+        if max_len > self.max_seq_len:
+            max_len = self.max_seq_len
+        mask = torch.zeros(batch_size, max_len, max_len, dtype=torch.bool, device=device)
+        augmented_seq_lens = torch.zeros(batch_size, dtype=seq_lens.dtype, device=seq_lens.device)
+        for i in range(batch_size):
+            cur_seq_len = seq_lens[i]
+            cur_seq = sequences[i][:cur_seq_len]
+            # to_be_sampled = self.max_seq_len - cur_seq_len
+            if cur_seq_len * 2 <= self.max_seq_len:
+                to_be_sampled = cur_seq_len
+            else:
+                to_be_sampled = self.max_seq_len - cur_seq_len
+            sg = dgl.sampling.sample_neighbors(g, cur_seq, -1)
+            prob = sg.edata['weight']
+            sampled_eid = np.random.choice(sg.edges(form='eid'), to_be_sampled.item(), p=prob / prob.sum())
+            row, col = sg.edges(form='uv')
+            row, col = row[sampled_eid], col[sampled_eid]
+            mask[i][:to_be_sampled] = True
+            mask[i] = mask[i] * (~torch.eye(max_len, device=device, dtype=torch.bool))
+            augmented_seq = torch.cat([row, cur_seq])
+            augmented_seq_lens[i] = augmented_seq.shape[0]
+            augmented_sequences.append(augmented_seq)
+        mask = mask.repeat(self.n_head, 1, 1)
+        mask = None
+        return (pad_sequence(augmented_sequences, batch_first=True).to(device), augmented_seq_lens.to(device)), mask
+    
 class Item_Random(torch.nn.Module):
 
     def __init__(self, mask_id, tao=0.2, gamma=0.7, beta=0.2) -> None:
@@ -98,6 +138,21 @@ class Item_Random(torch.nn.Module):
 
     def forward(self, sequences, seq_lens):
         return self.augmentation_methods[random.randint(0, len(self.augmentation_methods) - 1)](sequences, seq_lens)
+
+class Item_Random2(torch.nn.Module):
+
+    def __init__(self, mask_id, fiid, max_seq_len, n_head, tao=0.2, gamma=0.7, beta=0.2) -> None:
+        super().__init__()
+        self.mask_id = mask_id
+        self.augmentation_methods = [Item_Crop(tao=tao), Item_Mask(mask_id, gamma=gamma), Item_Reorder(beta=beta), Item_Expand(max_seq_len, n_head, fiid)]
+
+    def forward(self, sequences, seq_lens, g):
+        selection = random.randint(0, len(self.augmentation_methods) - 1)
+        selection = 3
+        if selection == len(self.augmentation_methods) - 1:
+            return self.augmentation_methods[selection](sequences, seq_lens, g)
+        else:
+            return self.augmentation_methods[selection](sequences, seq_lens), None
 
 class Item_Substitute(torch.nn.Module):
 
@@ -911,98 +966,6 @@ class GSLAugmentation3(GSLAugmentation):
 
         return output_dict
 
-class SpectralAugmentation(torch.nn.Module):
-    
-    def __init__(self, config, train_data) -> None:
-        super().__init__()
-        self.config = config
-        self.fiid = train_data.fiid
-        self.noise = config['noise_seq']
-        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
-
-    def forward(self, batch, query_encoder:torch.nn.Module, projection_head=None):
-        output_dict = {}
-        seqlen = batch['seqlen']
-
-        seq_augmented_i_out = query_encoder(batch, need_pooling=False, noise=self.noise) # [B, L, D]
-        seq_augmented_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seqlen, pooling_type='mean') # [B, D]
-
-        seq_augmented_j_out = query_encoder(batch, need_pooling=False, noise=self.noise) # [B, L, D]
-        seq_augmented_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seqlen, pooling_type='mean') # [B, D]
-
-        if projection_head != None:
-            seq_augmented_i_out = projection_head(seq_augmented_i_out)
-            seq_augmented_j_out = projection_head(seq_augmented_j_out)
-
-        cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out)
-        output_dict['cl_loss'] = cl_loss
-        return output_dict
-
-class GSL2Augmentation(torch.nn.Module):
-
-    def __init__(self, config, train_data) -> None:
-        super().__init__()
-        self.config = config
-        self.fiid = train_data.fiid
-        if self.config['augment_type'] == 'item_crop':
-            self.augmentation = Item_Crop()
-        elif self.config['augment_type'] == 'item_mask':
-            self.augmentation = Item_Mask(mask_id=train_data.num_items)
-        elif self.config['augment_type'] == 'item_reorder':
-            self.augmentation = Item_Reorder()
-        elif self.config['augment_type'] == 'item_random':
-            self.augmentation = Item_Random(mask_id=train_data.num_items)
-        else:
-            raise ValueError(f"augmentation type: '{self.config['augment_type']}' is invalided")
-
-        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
-
-        if self.config['intent_seq_representation_type'] == 'concat':
-            self.cluster = faiss.Kmeans(d=self.config['embed_dim'] * self.config['max_seq_len'], k=self.config['num_intent_clusters'], gpu=False)
-        else:
-            self.cluster = faiss.Kmeans(d=self.config['embed_dim'], k=self.config['num_intent_clusters'], gpu=False)
-        self.centroids = None
-
-    @torch.no_grad()
-    def train_kmeans(self, item_embed, device):
-        # intentions clustering
-        self.cluster.train(item_embed.cpu().numpy())
-        self.centroids = torch.from_numpy(self.cluster.centroids).to(device)
-
-    def forward(self, batch, item_embed:torch.Tensor, query_encoder:torch.nn.Module):
-        output_dict = {}
-        # augmented sequence representation without pooling.
-        # Because instance CL and Intent CL may use different pooling operations, we perform pooling operations in specific CL tasks.
-        seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_'+self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
-        seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_'+self.fiid], batch['seqlen'])
-        seq_augmented_i_out = query_encoder({"in_"+self.fiid : seq_augmented_i, "seqlen" : seq_augmented_i_len}, \
-            need_pooling=False) # [B, L, D]
-        seq_augmented_j_out = query_encoder({"in_"+self.fiid : seq_augmented_j, "seqlen" : seq_augmented_j_len}, \
-            need_pooling=False) # [B, L, D]
-
-        # Instance CL
-        instance_seq_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, \
-            pooling_type=self.config['instance_seq_representation_type']) # [B, L * D] or [B, D]
-        instance_seq_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, \
-            pooling_type=self.config['instance_seq_representation_type']) # [B, L * D]
-        instance_loss = self.InfoNCE_loss_fn(instance_seq_i_out, instance_seq_j_out) # [B, 2B]
-        instance_loss_rev = self.InfoNCE_loss_fn(instance_seq_j_out, instance_seq_i_out)
-
-        # Intent CL
-        row, col = batch['in_'+self.fiid].nonzero().T
-        item_seq = batch['in_'+self.fiid][row, col]
-        item_seq = item_embed[item_seq]
-        _, intent_ids = self.cluster.index.search(item_seq.cpu().detach().numpy(), 1)
-        seq2intents = self.centroids[intent_ids.squeeze(-1)]
-
-        intent_ids = torch.from_numpy(intent_ids.squeeze(-1)).to(item_seq.device)
-        intent_loss_i = self.InfoNCE_loss_fn(item_seq, seq2intents, instance_labels=intent_ids)
-
-        output_dict['instance_cl_loss'] = 0.5 * (instance_loss + instance_loss_rev)
-        output_dict['intent_cl_loss'] = 0.5 * (intent_loss_i)
-
-        return output_dict
-
 class GCL4SRAugmentation(torch.nn.Module):
 
     def __init__(self, config, train_data) -> None:
@@ -1085,6 +1048,53 @@ class CL4SRecAugmentation(torch.nn.Module):
         seq_augmented_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, pooling_type='mean') # [B, D]
 
         seq_augmented_j_out = query_encoder({"in_" + self.fiid: seq_augmented_j, "seqlen" : seq_augmented_j_len, "user_id": batch['user_id']},\
+            need_pooling=False) # [B, L, D]
+        seq_augmented_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, pooling_type='mean') # [B, D]
+
+        if projection_head != None:
+            seq_augmented_i_out = projection_head(seq_augmented_i_out)
+            seq_augmented_j_out = projection_head(seq_augmented_j_out)
+
+        cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out)
+        output_dict['cl_loss'] = cl_loss
+        return output_dict
+
+class GSLCL4SRecAugmentation(torch.nn.Module):
+
+    def __init__(self, config, train_data) -> None:
+        super().__init__()
+        self.config = config
+        self.fiid = train_data.fiid
+        if self.config['augment_type'] == 'item_crop':
+            self.augmentation = Item_Crop(self.config['tau'])
+        elif self.config['augment_type'] == 'item_mask':
+            self.augmentation = Item_Mask(mask_id=train_data.num_items)
+        elif self.config['augment_type'] == 'item_reorder':
+            self.augmentation = Item_Reorder()
+        elif self.config['augment_type'] == 'item_random':
+            self.augmentation = Item_Random(mask_id=train_data.num_items)
+        elif self.config['augment_type'] == 'item_random_gsl':
+            self.augmentation = Item_Random2(
+                mask_id=train_data.num_items,
+                fiid=train_data.fiid,
+                max_seq_len=train_data.config['max_seq_len'],
+                n_head=config['head_num'],
+            )
+        else:
+            raise ValueError(f"augmentation type: '{self.config['augment_type']}' is invalided")
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
+
+    def forward(self, batch, g, query_encoder:torch.nn.Module, projection_head=None):
+        output_dict = {}
+
+        (seq_augmented_i, seq_augmented_i_len), mask_i = self.augmentation(batch['in_' + self.fiid], batch['seqlen'], g) # seq: [B, L] seq_len : [B]
+        (seq_augmented_j, seq_augmented_j_len), mask_j = self.augmentation(batch['in_' + self.fiid], batch['seqlen'], g)
+
+        seq_augmented_i_out = query_encoder({"in_" + self.fiid: seq_augmented_i, "seqlen": seq_augmented_i_len, "user_id": batch['user_id'], "mask": mask_i},\
+            need_pooling=False) # [B, L, D]
+        seq_augmented_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, pooling_type='mean') # [B, D]
+
+        seq_augmented_j_out = query_encoder({"in_" + self.fiid: seq_augmented_j, "seqlen" : seq_augmented_j_len, "user_id": batch['user_id'], "mask": mask_j},\
             need_pooling=False) # [B, L, D]
         seq_augmented_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, pooling_type='mean') # [B, D]
 

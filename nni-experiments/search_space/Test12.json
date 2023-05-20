@@ -7,25 +7,17 @@
         "_type": "choice",
         "_value": [2]
     },
-    "model/layer_num": {
-        "_type": "choice",
-        "_value": [1, 2, 3]
-    },
     "model/noise": {
         "_type": "choice",
-        "_value": [0.05, 0.1]
+        "_value": [0.05]
     },
     "model/cl_weight": {
         "_type": "choice",
-        "_value": [0.1, 0.2, 0.5]
+        "_value": [0.05, 0.1, 0.2, 0.5, 0.8]
     },
     "model/gcl_weight": {
         "_type": "choice",
-        "_value": [0.1, 0.2, 0.5]
-    },
-    "model/kl_weight": {
-        "_type": "choice",
-        "_value": [0.01]
+        "_value": [0]
     },
     "model/temperature": {
         "_type": "choice",

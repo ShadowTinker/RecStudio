@@ -1,7 +1,7 @@
-experimentName: Test9-amazon-toys
-searchSpaceFile: ../search_space/Test9.json
+experimentName: Test12-amazon-beauty-gsl_aug
+searchSpaceFile: ../search_space/Test12.json
 
-trialCommand: python3 run.py -m Test9 -d amazon-toys --mode tune
+trialCommand: python3 run.py -m Test12 -d amazon-beauty --mode tune
 trialCodeDirectory: ../..
 trialGpuNumber: 1
 
@@ -26,7 +26,7 @@ assessor:
   name: Medianstop
   classArgs:
     optimize_mode: maximize
-    start_step: 200
+    start_step: 150
 # Configure the training platform.
 # Supported platforms: local, remote, openpai, aml, kubeflow, kubernetes, adl.
 
