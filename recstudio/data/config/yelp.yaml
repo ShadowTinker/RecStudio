@@ -1,14 +1,14 @@
-url: https://rec.ustc.edu.cn/share/cdc6de70-2f87-11ed-b5db-4d1a26914a90
+# url: https://rec.ustc.edu.cn/share/cdc6de70-2f87-11ed-b5db-4d1a26914a90
 user_id_field: &u user_id:token # TODO: comments for &u and *u
-item_id_field: &i business_id:token
-rating_field: &r stars:float
-time_field: &t date:float
+item_id_field: &i item_id:token
+rating_field: ~
+time_field: &t timestamp:float
 time_format: ~
 
 
 encoding_method: utf-8
-inter_feat_name: yelp_inter.csv
-inter_feat_field: [review_id:token, *u, *i, *r, *t]
+inter_feat_name: yelp.csv
+inter_feat_field: [*u, *i, *t]
 inter_feat_header: 0
 
 
@@ -23,11 +23,11 @@ item_feat_header: 0
 
 
 use_fields: ~  # TODO:
-field_separator: ","
-min_user_inter: 5
-min_item_inter: 5
+field_separator: "\t"
+min_user_inter: 1
+min_item_inter: 1
 field_max_len: ~
-low_rating_threshold: 3
+low_rating_threshold: 0
 max_seq_len: 50
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features

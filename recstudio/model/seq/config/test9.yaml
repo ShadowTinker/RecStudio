@@ -1,5 +1,5 @@
 model:
-  hidden_size: 256
+  hidden_size: 64
   layer_num: 2
   head_num: 2
   dropout_rate: 0.5
@@ -10,13 +10,14 @@ model:
   gnn_layers: 2
   noise: 0.05
   temperature: 0.2
+  graph_temperature: 0.2
   gcl_weight: 0.1
   cl_weight: 0.1
   kl_weight: 0.
   augment_type: item_random # item_crop, item_mask, item_reorder, item_random
 
 train:
-  early_stop_patience: 25
+  early_stop_patience: 40
   batch_size: 256
   negative_count: 1
   init_method: normal

@@ -67,7 +67,7 @@ train:
 
 eval:
     batch_size: 128
-    cutoff: [20, 50, 10]
+    cutoff: [20, 5]
     val_metrics: [ndcg, recall]
     val_n_epoch: 1
     test_metrics: [ndcg, recall, precision, map, mrr, hit]

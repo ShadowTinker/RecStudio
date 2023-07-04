@@ -901,6 +901,7 @@ class GSLAugmentation3(GSLAugmentation):
         # self.VAE = nn.Linear(config['embed_dim'], config['embed_dim'] * 2)
         self.kl_loss = 0
         self.get_svd()
+        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['graph_temperature'], sim_method='cosine')
 
     def get_svd(self):
         U, S, V = torch.svd_lowrank(self.norm_adj.to_dense(), self.embed_dim * 4)
@@ -909,32 +910,16 @@ class GSLAugmentation3(GSLAugmentation):
         
     def get_gnn_embeddings(self, emb, device, noise=True):
         self.g, self.norm_adj = self.g.to(device), self.norm_adj.to(device)
-        self.real_US, self.real_V = self.real_US.to(device), self.real_V.to(device)
         if noise:
-            # US_mean, US_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.US.weight.T), 2, -1)
-            # US = self.reparameterize(US_mean, US_logvar)
-            # self.kl_loss = self.kl_loss + self.kl_loss_func(US_mean, US_logvar)
-            # V_mean, V_logvar = torch.tensor_split(torch.sparse.mm(self.norm_adj, self.V.weight.T), 2, -1)
-            # V = self.reparameterize(V_mean, V_logvar)
-            # self.kl_loss = self.kl_loss + self.kl_loss_func(V_mean, V_logvar)
 
             US = torch.sparse.mm(self.norm_adj, self.US.weight.T)
             V = torch.sparse.mm(self.norm_adj, self.V.weight.T)
-            self.kl_loss = self.kl_loss + ((US - self.real_US) ** 2).sum()
-            self.kl_loss = self.kl_loss + ((V - self.real_V) ** 2).sum()
         emb_list = [emb]
         for idx in range(self.gnn_layers):
-            # # ----Case 1----
-            # if not noise:
-            #     emb = self.gnn_conv(self.g, emb)
-            # else:
-            #     emb = US @ (V.T @ emb)
-
-            # ----Case 2----
+            # emb = torch.sparse.mm(self.norm_adj, emb)
             emb = self.gnn_conv(self.g, emb)
             if noise:
                 emb = emb + self.noise * US @ (V.T @ emb)
-            
             emb_list.append(emb)
         emb = torch.stack(emb_list, dim=1).mean(1)
         return emb
@@ -1017,6 +1002,24 @@ class GCL4SRAugmentation(torch.nn.Module):
 
         output_dict['cl_loss'] = item_cl_loss
 
+        return output_dict
+
+class DuoRecAugmentation(torch.nn.Module):
+    def __init__(self, config, train_data) -> None:
+        super().__init__()
+        self.config = config
+        self.fiid = train_data.fiid
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
+
+    def forward(self, batch, query1, query2):
+        output_dict = {}
+        seqlen = batch['seqlen']
+
+        seq_augmented_i_out = recfn.seq_pooling_function(query1, seqlen, pooling_type='last') # [B, D]
+        seq_augmented_j_out = recfn.seq_pooling_function(query2, seqlen, pooling_type='last') # [B, D]
+
+        cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out)
+        output_dict['cl_loss'] = cl_loss
         return output_dict
 
 # Sequence augmentation models

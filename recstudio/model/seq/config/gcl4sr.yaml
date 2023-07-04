@@ -9,7 +9,7 @@ model:
   k: 2
   temperature: 0.2
   cl_weight: 0.1
-  mmd_weight: 0.1
+  mmd_weight: 0.
 
 
 train:

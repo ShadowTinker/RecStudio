@@ -2,6 +2,12 @@ model:
   hidden_size: 128
   dropout_rate: 0.3
   layer_num: 2
+  k: 2
+  gnn_layers: 2
+  noise: 0.05
+  temperature: 0.2
+  graph_temperature: 0.2
+  cl_weight: 0.1
 
 train:
   early_stop_patience: 40
