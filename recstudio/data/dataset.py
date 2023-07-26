@@ -2,6 +2,7 @@ import copy
 import os
 import pickle
 import logging
+from typing import Dict, List, Union
 import warnings
 from typing import *
 from operator import itemgetter
@@ -1462,6 +1463,298 @@ class SeqToSeqDataset(SeqDataset):
                             persistent_workers=False)
         return output
 
+class SingleDomainDataset(TripletDataset):
+    def __init__(self, name: str = 'ml-100k', config: Union[Dict, str] = None):
+        r"""Load all data.
+
+        Args:
+            config(str): config file path or config dict for the dataset.
+
+        Returns:
+            recstudio.data.dataset.TripletDataset: The ingredients list.
+        """
+        self.name = name
+
+        self.logger = logging.getLogger('recstudio')
+
+        self.config = get_dataset_default_config(name)
+        if config is not None:
+            if isinstance(config, str):
+                self.config.update(parser_yaml(config))
+            elif isinstance(config, Dict):
+                self.config.update(config)
+            else:
+                raise TypeError("expecting `config` to be Dict or string,"
+                                f"while get {type(config)} instead.")
+
+        self._preprocess()
+        self._use_field = set([self.fuid, self.fiid, self.frating])
+
+    def _preprocess(self):
+        cache_flag, data_dir = check_valid_dataset(self.name, self.config)
+        if cache_flag:
+            self.logger.info("Load dataset from cache.")
+            self._load_cache(data_dir)
+        else:
+            self._init_common_field()
+            self._load_all_data(data_dir, self.config['field_separator'])
+            # first factorize user id and item id, and then filtering to
+            # determine the valid user set and item set
+            self._filter(self.config['min_user_inter'],
+                         self.config['min_item_inter'])
+            self._float_preprocess()
+
+    def get_hist(self, isUser=True):
+        r"""Get user or item interaction history.
+
+        Args:
+            isUser(bool, optional): Default: ``True``.
+
+        Returns:
+            torch.Tensor: padded user or item hisoty.
+
+            torch.Tensor: length of the history sequence.
+        """
+        user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
+        item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
+        sorted, index = torch.sort(user_array if isUser else item_array)
+        user_item, count = torch.unique_consecutive(sorted, return_counts=True)
+        list_ = torch.split(
+            item_array[index] if isUser else user_array[index], tuple(count.numpy()))
+        tensors = [torch.tensor([], dtype=torch.int64) for _ in range(
+            self.num_users if isUser else self.num_items)]
+        for idx, (i, l) in enumerate(zip(user_item, list_)):
+            # TODO: maybe incorrect when user_item is not sorted or the number of history item is zero w.r.t. some users.
+            tensors[idx + 1] = l # The first one is for padding
+        user_count = torch.tensor([len(e) for e in tensors])
+        tensors = pad_sequence(tensors, batch_first=True)
+        return tensors, user_count
+
+
+class CrossDomainDataset(TripletDataset):
+    r""":class:`CrossDomainDataset` is based on :class:`~recbole.data.dataset.dataset.Dataset`,
+    and load both `SourceDataset` and `TargetDataset` additionally.
+
+    Users and items in both dataset are remapped together.
+    All users (or items) are remapped into three consecutive ID sections.
+
+    - users (or items) that exist both in source dataset and target dataset.
+    - users (or items) that only exist in source dataset.
+    - users (or items) that only exist in target dataset.
+    """
+
+    def __init__(self, name: str = 'ml-100k', config: Union[Dict, str] = None) -> None:
+        # TODO: set a default CDR dataset, like ml-100k to ml-1m
+        self.name = name
+
+        self.logger = logging.getLogger('recstudio')
+
+        self.config = get_dataset_default_config(name)
+        config['save_cache'] = False
+        
+        cache_flag, data_dir = check_valid_dataset(self.name, self.config)
+        if cache_flag:
+            self.logger.info("Load dataset from cache.")
+            self._load_cache(data_dir)
+        else:
+            self._register_subdatasets(config)
+            self._init_common_field()
+            self._remap_all_domains()
+            self._post_preprocess()
+            if self.config['save_cache']:
+                self._save_cache(md5(self.config))
+                
+        self._use_field = set([self.fuid, self.fiid, self.frating])
+
+    @property
+    def all_dataset_names(self):
+        return list(set(self.config['source_dataset_names'] + self.config['target_dataset_names']))
+
+    @property
+    def source_dataset_names(self):
+        return self.config['source_dataset_names']
+    
+    @property
+    def target_dataset_names(self):
+        return self.config['target_dataset_names']
+
+    @property
+    def unique_dataset_names(self):
+        return list(set(self.source_dataset_names) | set(self.target_dataset_names))
+
+    def source_datasets(self, index=None):
+        if index == 'all':
+            return list(self._source_datasets.values())
+        elif isinstance(index, str):
+            return self._source_datasets[index]
+        elif isinstance(index, int):
+            return list(self._source_datasets.values())[index]
+        else:
+            raise NotImplementedError
+        
+    def target_datasets(self, index=None):
+        if index == 'all':
+            return list(self._target_datasets.values())
+        elif isinstance(index, str):
+            return self._target_datasets[index]
+        elif isinstance(index, int):
+            return list(self._target_datasets.values())[index]
+        else:
+            raise NotImplementedError
+        
+    def unique_datasets(self, index=None):
+        if index == 'all':
+            return list(self._unique_datasets.values())
+        elif isinstance(index, str):
+            return self._unique_datasets[index]
+        elif isinstance(index, int):
+            return list(self._unique_datasets.values())[index]
+        else:
+            raise NotImplementedError
+
+    def _register_subdatasets(self, config):
+        self._source_datasets = OrderedDict()
+        self._target_datasets = OrderedDict()
+        self._unique_datasets = OrderedDict()
+        for dataset_name in self.source_dataset_names:
+            dataset = SingleDomainDataset(dataset_name, config)
+            self._source_datasets[dataset_name] = dataset
+            self._unique_datasets[dataset_name] = dataset
+
+        for dataset_name in self.target_dataset_names:
+            if dataset_name in self.source_dataset_names:
+                self._target_datasets[dataset_name] = self._source_datasets[dataset_name]
+            else:
+                dataset = SingleDomainDataset(dataset)
+                self._target_datasets[dataset_name] = dataset
+                self._unique_datasets[dataset_name] = dataset
+
+    def _init_common_field(self):
+        # TODO: only support datasets with same fields
+        super()._init_common_field()
+        sub_dataset = self.source_datasets(0)
+        self.field2type = sub_dataset.field2type
+
+    def _get_map_fields(self):
+        fields_share_space = [[f] for f, t in self.field2type.items() if ('token' in t)]
+        return fields_share_space
+
+    def _get_feat_list(self):
+        feat_list = list(zip(*[_._get_feat_list() for _ in list(self._unique_datasets.values())]))
+        domain_split = []
+        for feat_pair in feat_list:
+            domain_split.append([0])
+            for feat in feat_pair:
+                if feat is not None:
+                    domain_split[-1].append(len(feat))
+                else:
+                    domain_split[-1].append(0)
+            domain_split[-1] = np.cumsum(domain_split[-1])
+        return feat_list, domain_split
+    
+    def _remap_all_domains(self):
+        # TODO: domain in target while not in source
+        # TODO: only support 2 source domains
+        # TODO: now only support homogeneous datasets
+        # TODO: comment on this function
+        fields_share_space = self._get_map_fields()
+        original_feat_list, domain_split = self._get_feat_list()
+        feat_list = [pd.concat(_) if _[0] is not None else None for _ in original_feat_list]
+        for field_set in fields_share_space:
+            flag = self.config['network_feat_name'] is not None \
+                and (self.fuid in field_set or self.fiid in field_set)
+            token_list = []
+            field_feat = [(field, feat, idx) for field in field_set
+                          for idx, feat in enumerate(feat_list) if (feat is not None) and (field in feat)]
+            for field, feat, _ in field_feat:
+                if 'seq' not in self.field2type[field]:
+                    token_list.append(feat[field].values)
+                else:
+                    token_list.append(feat[field].agg(np.concatenate))
+            count_inter_user_or_item = sum(1 for x in field_feat if x[-1] < 3)
+            split_points = np.cumsum([len(_) for _ in token_list])
+            token_list = np.concatenate(token_list)
+            tid_list, tokens = pd.factorize(token_list)
+            max_user_or_item_id = np.max(
+                tid_list[:split_points[count_inter_user_or_item-1]]) + 1 if flag else 0
+            if '[PAD]' not in set(tokens):
+                tokens = np.insert(tokens, 0, '[PAD]')
+                tid_list = np.split(tid_list + 1, split_points[:-1])
+                token2id = {tok: i for (i, tok) in enumerate(tokens)}
+                max_user_or_item_id += 1
+            else:
+                token2id = {tok: i for (i, tok) in enumerate(tokens)}
+                tid = token2id['[PAD]']
+                tokens[tid] = tokens[0]
+                token2id[tokens[0]] = tid
+                tokens[0] = '[PAD]'
+                token2id['[PAD]'] = 0
+                idx_0, idx_1 = (tid_list == 0), (tid_list == tid)
+                tid_list[idx_0], tid_list[idx_1] = tid, 0
+                tid_list = np.split(tid_list, split_points[:-1])
+
+            for (field, feat, idx), _ in zip(field_feat, tid_list):
+                if field not in self.field2tokens:
+                    if flag:
+                        if (field in [self.fuid, self.fiid]):
+                            self.field2tokens[field] = tokens[:max_user_or_item_id]
+                            self.field2token2idx[field] = {
+                                tokens[i]: i for i in range(max_user_or_item_id)}
+                        else:
+                            tokens_ori = self._get_ori_token(idx-3, tokens)
+                            self.field2tokens[field] = tokens_ori
+                            self.field2token2idx[field] = {
+                                t: i for i, t in enumerate(tokens_ori)}
+                    else:
+                        self.field2tokens[field] = tokens
+                        self.field2token2idx[field] = token2id
+                if 'seq' not in self.field2type[field]:
+                    for index, ori_feat in enumerate(original_feat_list[idx]):
+                        # Record token list
+                        domain_tokens = np.array(['[PAD]'] + list(set(ori_feat[field]) & set(tokens)))
+                        domain_token2idx = {k: self.field2token2idx[field][k] for k in domain_tokens}
+                        self.unique_datasets(index).field2tokens[field] = domain_tokens
+                        self.unique_datasets(index).field2token2idx[field] = domain_token2idx
+                        # Remap single domain
+                        ori_feat[field] = _[domain_split[idx][index] : domain_split[idx][index + 1]]
+                        ori_feat[field] = ori_feat[field].astype('Int64')
+                    feat[field] = _
+                    feat[field] = feat[field].astype('Int64')
+                else:
+                    # TODO: add support for seq feature
+                    raise NotImplementedError
+                    sp_point = np.cumsum(feat[field].agg(len))[:-1]
+                    feat[field] = np.split(_, sp_point)
+
+    def _post_preprocess(self):
+        dataset_list = self.unique_datasets('all')
+        for dataset in dataset_list:
+            dataset._post_preprocess()
+
+    def build(
+            self, **kwargs
+        ):
+            # TODO: support for no validation set
+            built_datasets_list = [[], [], []]
+            if self.config['domain_sampling'] == 'separate':
+                for dataset_name in self.all_dataset_names:
+                    if dataset_name not in self.target_dataset_names:
+                        # TODO: Only used for training
+                        pass
+                    elif dataset_name not in self.source_dataset_names:
+                        # TODO: Only used for testing
+                        pass
+                    else:
+                        # Used for both training and testing
+                        built_datasets = self.unique_datasets(dataset_name).build(**kwargs)
+                        built_datasets_list[0].append(built_datasets[0])
+                        built_datasets_list[1].append(built_datasets[1])
+                        built_datasets_list[2].append(built_datasets[2])
+            elif self.config['domain_sampling'] == 'togather':
+                # TODO: mix dataset for sampling
+                pass
+            self.built_datasets = built_datasets_list
+            return built_datasets_list
 
 class TensorFrame(Dataset):
     r"""The main data structure used to save interaction data in RecStudio dataset.
