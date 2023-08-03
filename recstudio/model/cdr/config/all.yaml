@@ -1,0 +1,38 @@
+data:
+    split_mode: user_entry # user # entry
+    fmeval: False
+    binaried_rating_thres: 0.0
+
+train:
+    batch_size: 512
+    early_stop_patience: 10
+
+    epochs: 1000
+    gpu: 1
+    init_method: xavier_normal  # [xavier_normal, normal]
+    learner: adam
+    learning_rate: 0.001
+    num_threads: 10
+
+    # negative sampler configuration in training procedure
+    # `method` describes the retrieving method used to retrieve negative items with a retriever.
+    sampling_method: none    # [none, sir, dns, toprand, top&rand, brute]
+
+    # `sampler` describes the negative sampler used to train models.
+    sampler: uniform    # [uniform, pop, midx-uni, midx-pop, cluster-uni, cluster-pop]
+
+    seed: 2022  # random seed, usually 42 is a magic number
+    weight_decay: 0.0      # weight decay for the optimizer
+    tensorboard_path: ~
+
+eval:
+    batch_size: 512
+    cutoff: [10, 20]
+    val_metrics: [recall, ndcg]
+    val_n_epoch: 1
+    test_metrics: [recall, ndcg]
+    topk: 100
+    save_path: './saved/'
+
+model:
+    embed_dim: 64

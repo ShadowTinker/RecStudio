@@ -1,0 +1,4 @@
+source_dataset_names: [amazon-beauty, amazon-toys, amazon-sports]
+target_dataset_names: [amazon-beauty, amazon-toys, amazon-sports]
+domain_sampling: 'separate' # selected among ['separate', 'togather']
+save_cache: True

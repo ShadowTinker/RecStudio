@@ -1504,6 +1504,12 @@ class SingleDomainDataset(TripletDataset):
                          self.config['min_item_inter'])
             self._float_preprocess()
 
+    def _generate_reverse_map(self):
+        self._map_all_ids()
+        self.reverse_field2token2idx = {}
+        for field, mapping in self.field2token2idx.items():
+            self.reverse_field2token2idx[field] = {v: k for k, v in mapping.items()}
+
     def get_hist(self, isUser=True):
         r"""Get user or item interaction history.
 
@@ -1565,6 +1571,14 @@ class CrossDomainDataset(TripletDataset):
                 self._save_cache(md5(self.config))
                 
         self._use_field = set([self.fuid, self.fiid, self.frating])
+
+    def __repr__(self):
+        # TODO: add statistics of CDR problem.
+        info_str = f"\n{set_color('Cross Domain Dataset Info','green')}: \n"
+        
+        for dataset in self.unique_datasets('all'):
+            info_str += dataset.name + "  " + dataset.__repr__() + "\n"
+        return info_str
 
     @property
     def all_dataset_names(self):
@@ -1633,6 +1647,9 @@ class CrossDomainDataset(TripletDataset):
         # TODO: only support datasets with same fields
         super()._init_common_field()
         sub_dataset = self.source_datasets(0)
+        for sub_dataset in self.unique_datasets('all'):
+            sub_dataset.domain_field2tokens = {}
+            sub_dataset.domain_field2token2idx = {}
         self.field2type = sub_dataset.field2type
 
     def _get_map_fields(self):
@@ -1660,6 +1677,7 @@ class CrossDomainDataset(TripletDataset):
         fields_share_space = self._get_map_fields()
         original_feat_list, domain_split = self._get_feat_list()
         feat_list = [pd.concat(_) if _[0] is not None else None for _ in original_feat_list]
+        self.inter_feat, self.user_feat, self.item_feat = feat_list
         for field_set in fields_share_space:
             flag = self.config['network_feat_name'] is not None \
                 and (self.fuid in field_set or self.fiid in field_set)
@@ -1713,8 +1731,8 @@ class CrossDomainDataset(TripletDataset):
                         # Record token list
                         domain_tokens = np.array(['[PAD]'] + list(set(ori_feat[field]) & set(tokens)))
                         domain_token2idx = {k: self.field2token2idx[field][k] for k in domain_tokens}
-                        self.unique_datasets(index).field2tokens[field] = domain_tokens
-                        self.unique_datasets(index).field2token2idx[field] = domain_token2idx
+                        self.unique_datasets(index).domain_field2tokens[field] = domain_tokens
+                        self.unique_datasets(index).domain_field2token2idx[field] = domain_token2idx
                         # Remap single domain
                         ori_feat[field] = _[domain_split[idx][index] : domain_split[idx][index + 1]]
                         ori_feat[field] = ori_feat[field].astype('Int64')
@@ -1727,8 +1745,10 @@ class CrossDomainDataset(TripletDataset):
                     feat[field] = np.split(_, sp_point)
 
     def _post_preprocess(self):
+        super()._post_preprocess()
         dataset_list = self.unique_datasets('all')
         for dataset in dataset_list:
+            dataset._generate_reverse_map() # Further reduce global token id in each dataset to local token id.
             dataset._post_preprocess()
 
     def build(
@@ -1753,8 +1773,9 @@ class CrossDomainDataset(TripletDataset):
             elif self.config['domain_sampling'] == 'togather':
                 # TODO: mix dataset for sampling
                 pass
-            self.built_datasets = built_datasets_list
-            return built_datasets_list
+            self.dataframe2tensors()
+            # self.user_hist, self.user_count = self.get_hist(True) # TODO: add for togather training and testing.
+            return self, built_datasets_list
 
 class TensorFrame(Dataset):
     r"""The main data structure used to save interaction data in RecStudio dataset.
@@ -2040,6 +2061,53 @@ class CombinedLoaders(object):
                 batch.update(next(self.loaders[i+1]))
         return batch
 
+class CrossDomainLoaders(object):
+    def __init__(self, loaders) -> None:
+        r"""
+        The first loader will dominating the training procedure.
+        """
+        self.loaders = copy.deepcopy(loaders)
+
+    def __len__(self):
+        return len(self.loaders[0])
+
+    def __iter__(self):
+        for i, l in enumerate(self.loaders):
+            self.loaders[i] = iter(l)
+        return self
+
+    @staticmethod
+    def _add_domain_prefix(batch : Dict, domain_name : str):
+        for k, v in batch.items():
+            batch[domain_name + '_' + k] = batch.pop(k)
+        return batch
+
+    def _token_id_remap(self, batch, dataset):
+        mapping_dict = dataset.reverse_field2token2idx
+        def remap(x, *args):
+            return field_mapping[x]
+        for field, batch_data in batch.items():
+            if field in mapping_dict.keys():
+                field_mapping = mapping_dict[field]
+                batch[field] = batch_data.map_(batch_data, remap)
+        return batch
+
+    def __next__(self):
+        total_batch = {}
+        for i, l in enumerate(self.loaders):
+            domain_name = l._dataset.name
+            if i == 0:
+                batch = next(l)
+            else:
+                # Start a new interation when this dataset is shorter than the first dataset.
+                try:
+                    batch = next(l)
+                except StopIteration:
+                    batch = next(l)
+            batch = self._token_id_remap(batch, l._dataset)
+            # rst = self._add_domain_prefix(rst, domain_name)
+            total_batch[domain_name] = batch
+        return total_batch
 
 class DatasetFromSampler(Dataset):
     """Dataset to create indexes from `Sampler`.
