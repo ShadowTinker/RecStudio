@@ -1581,10 +1581,6 @@ class CrossDomainDataset(TripletDataset):
         return info_str
 
     @property
-    def all_dataset_names(self):
-        return list(set(self.config['source_dataset_names'] + self.config['target_dataset_names']))
-
-    @property
     def source_dataset_names(self):
         return self.config['source_dataset_names']
     
@@ -1757,7 +1753,7 @@ class CrossDomainDataset(TripletDataset):
             # TODO: support for no validation set
             built_datasets_list = [[], [], []]
             if self.config['domain_sampling'] == 'separate':
-                for dataset_name in self.all_dataset_names:
+                for dataset_name in self.unique_dataset_names:
                     if dataset_name not in self.target_dataset_names:
                         # TODO: Only used for training
                         pass
