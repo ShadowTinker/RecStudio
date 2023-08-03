@@ -4,6 +4,7 @@ import inspect
 import logging
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
+from tqdm import tqdm
 
 import time
 import nni
@@ -128,6 +129,14 @@ class CrossRetriever(basemodel.BaseRetriever):
 
         for loader_idx, loader in enumerate(trn_dataloaders):
             outputs = []
+            loader = tqdm(
+                loader,
+                total=len(loader),
+                ncols=75,
+                desc=set_color(f"Training {nepoch:>5}", "green"),
+                leave=False,
+                disable=self.run_mode == 'tune', # Mute the progressbar when tuning
+            )
             for batch_idx, batch in enumerate(loader):
                 # data to device
                 batch = self._to_device(batch, self._parameter_device)
@@ -196,6 +205,14 @@ class CrossRetriever(basemodel.BaseRetriever):
             def remap(x, *args):
                 return mapping_dict[x]
             self._update_item_vector(domain)
+            loader = tqdm(
+                loader,
+                total=len(loader),
+                ncols=75,
+                desc=set_color(f"Evaluating {domain:>5} {nepoch:>5}", "green"),
+                leave=False,
+                disable=self.run_mode == 'tune', # Mute the progressbar when tuning
+            )
             for domain_batch_num, batch in enumerate(loader):
                 # remap local token id to global token id, which will ensure generation of correct queries
                 batch[self.fuid] = batch[self.fuid].map_(batch[self.fuid], remap)
@@ -435,7 +452,7 @@ class CrossRetriever(basemodel.BaseRetriever):
         self.fuid = meta_dataset.fuid
         assert self.fiid in self.item_fields, 'item id is required to use.'
 
-        # Register field for CDR
+        # =============== Register as a CDR Retriever ================
         self.datasets = meta_dataset
         self.SOURCE_DOMAINS = meta_dataset.source_dataset_names
         self.TARGET_DOMAINS = meta_dataset.target_dataset_names
@@ -469,8 +486,10 @@ class CrossRetriever(basemodel.BaseRetriever):
 
     def _update_item_vector(self, domain=None):
         if domain != None:
+            # Called when valid/test, the item_vector belongs to only one domain
             item_vector = self._get_item_vector(domain)
         else:
+            # Called when training, the item_vector belongs to all domains
             item_vector = super()._get_item_vector()
         if not hasattr(self, "item_vector"):
             self.register_buffer('item_vector', item_vector.detach().clone() if isinstance(item_vector, torch.Tensor) \
