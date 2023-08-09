@@ -1757,6 +1757,33 @@ class CrossDomainDataset(TripletDataset):
             dataset._generate_reverse_map() # Further reduce global token id in each dataset to local token id.
             dataset._post_preprocess()
 
+    def _update_inter_feat(self, built_datasets_list):
+        r"""Generate data_index for meta-dataset with data_index of sub-datasets w.r.t training splits.
+        We don't generate valid/test data index to avoid data leak.
+        Datasets in built_datasets_list are sorted as in self.unique_dataset_names.
+        """
+        # Update self.inter_feat with inter_feat of sub-datasets
+        def remap(x, *args):
+            return field_mapping[x]
+        inter_feat_data_list = {field: [] for field in self.inter_feat.fields}
+        for dataset in built_datasets_list:
+            mapping_dict = dataset.reverse_field2token2idx
+            sub_inter_feat = copy.deepcopy(dataset.inter_feat.data)
+            for field, inter_feat_data in sub_inter_feat.items():
+                if field in mapping_dict.keys():
+                    field_mapping = mapping_dict[field]
+                    inter_feat_data = inter_feat_data.map_(inter_feat_data, remap)
+                inter_feat_data_list[field].append(inter_feat_data)
+        for field in self.inter_feat.fields:
+            self.inter_feat.data[field] = torch.cat(inter_feat_data_list[field])
+        self.inter_feat = TensorFrame.fromPandasDF(pd.DataFrame.from_dict(self.inter_feat.data), self) # Rebuild self.inter_feat
+        # Compute data index
+        data_index_list = [copy.deepcopy(_.data_index) for _ in built_datasets_list]
+        dataset_length_list = [_.inter_feat.__len__() for _ in built_datasets_list]
+        for idx, data_index in enumerate(data_index_list[1:]):
+            data_index += dataset_length_list[idx]
+        self.data_index = torch.cat(data_index_list)
+
     def build(
             self, **kwargs
         ):
@@ -1780,6 +1807,7 @@ class CrossDomainDataset(TripletDataset):
                 # TODO: mix dataset for sampling
                 pass
             self.dataframe2tensors()
+            self._update_inter_feat(built_datasets_list[0])
             # self.user_hist, self.user_count = self.get_hist(True) # TODO: add for togather training and testing.
             return self, built_datasets_list
 
