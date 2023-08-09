@@ -1582,15 +1582,25 @@ class CrossDomainDataset(TripletDataset):
 
     @property
     def source_dataset_names(self):
+        r"""Result is sorted as in config files.
+        """
         return self.config['source_dataset_names']
     
     @property
     def target_dataset_names(self):
+        r"""Result is sorted as in config files.
+        """
         return self.config['target_dataset_names']
 
     @property
     def unique_dataset_names(self):
-        return list(set(self.source_dataset_names) | set(self.target_dataset_names))
+        r"""Result is sorted from 'Source Domain' to 'Target Domain', left to right in config files.
+        """
+        ret = self.source_dataset_names
+        for _ in self.target_dataset_names:
+            if _ not in ret:
+                ret.append(_)
+        return ret
 
     def source_datasets(self, index=None):
         if index == 'all':
