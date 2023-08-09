@@ -1,0 +1,7 @@
+model:
+  n_layers: 3
+  l2_reg_weight: 0e-4
+
+train:
+  weight_decay: 0
+  negative_count: 1
