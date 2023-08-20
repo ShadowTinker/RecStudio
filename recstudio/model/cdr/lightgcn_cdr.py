@@ -16,24 +16,25 @@ class LightGCN_CDR(basemodel.CrossRetriever):
     LightGCN simplifies the design of GCN to make it more concise and appropriate for recommendation.
     LightGCN learns user and item embeddings by linearly propagating them on the user-item interaction graph, and uses the weighted sum of the embeddings learned at all layers as the final embedding.
     """
-    def _init_model(self, meta_dataseat: CrossDomainDataset, train_data):
-        super()._init_model(meta_dataseat, train_data)
-        self.num_users = meta_dataseat.num_users
-        self.num_items = meta_dataseat.num_items
-        self.user_emb = torch.nn.Embedding(meta_dataseat.num_users, self.embed_dim, padding_idx=0)
-        self.item_emb = torch.nn.Embedding(meta_dataseat.num_items, self.embed_dim, padding_idx=0)
+    def _init_model(self, meta_dataset: CrossDomainDataset, train_data):
+        super()._init_model(meta_dataset, train_data)
+        self.num_users = meta_dataset.num_users
+        self.num_items = meta_dataset.num_items
+        self.user_emb = torch.nn.Embedding(meta_dataset.num_users, self.embed_dim, padding_idx=0)
+        self.item_emb = torch.nn.Embedding(meta_dataset.num_items, self.embed_dim, padding_idx=0)
         self.combiners = torch.nn.ModuleList()
         for i in range(self.config['model']['n_layers']):
             self.combiners.append(graphmodule.LightGCNCombiner(self.embed_dim, self.embed_dim))
         self.LightGCNNet = graphmodule.LightGCNNet_dglnn(self.combiners)
-        adj_size = meta_dataseat.num_users + meta_dataseat.num_items
-        self.adj_mat, _ = meta_dataseat.get_graph([0], form='dgl', value_fields='inter', \
-            col_offset=[meta_dataseat.num_users], bidirectional=[True], shape=(adj_size, adj_size))
+        adj_size = meta_dataset.num_users + meta_dataset.num_items
+        self.adj_mat, _ = meta_dataset.get_graph([0], form='dgl', value_fields='inter', \
+            col_offset=[meta_dataset.num_users], bidirectional=[True], shape=(adj_size, adj_size))
 
     def _get_dataset_class():
         return CrossDomainDataset
 
     def _get_loss_func(self):
+        self.domain_loss_ratio = self.config['train']['domain_loss_ratio']
         return loss_func.BPRLoss()
 
     def _get_score_func(self):
@@ -69,16 +70,16 @@ class LightGCN_CDR(basemodel.CrossRetriever):
     def training_step(self, batch):
         outputs = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss), True, True)
         loss_value = 0
-        for domain in self.SOURCE_DOMAINS:
+        for idx, domain in enumerate(self.SOURCE_DOMAINS):
             score = outputs[domain]['score']
             score['label'] = batch[domain][self.frating]
-            loss_value += self.loss_fn(**score)
-            loss_value += self.config['model']['l2_reg_weight'] * loss_func.l2_reg_loss_fn(
+            domain_loss = self.loss_fn(**score)
+            domain_loss += self.config['model']['l2_reg_weight'] * loss_func.l2_reg_loss_fn(
                 self.user_emb(batch[domain][self.fuid]),
                 self.item_emb(batch[domain][self.fiid]),
                 self.item_emb(outputs[domain]['neg_id'].reshape(-1))
             )
-            break
+            loss_value += self.domain_loss_ratio[idx] * domain_loss
         return loss_value
 
     def _get_item_vector(self, domain=None):        

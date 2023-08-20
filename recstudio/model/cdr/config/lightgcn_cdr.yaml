@@ -5,3 +5,4 @@ model:
 train:
   weight_decay: 0
   negative_count: 1
+  domain_loss_ratio: [0.7, 0.9]

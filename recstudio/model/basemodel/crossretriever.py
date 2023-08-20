@@ -108,8 +108,9 @@ class CrossRetriever(basemodel.BaseRetriever):
         return self.callback.best_ckpt['metric']
 
     def training_epoch(self, nepoch):
-        if hasattr(self, "_update_item_vector"):
-            self._update_item_vector()
+        # if hasattr(self, "_update_item_vector"):
+        #     for domain in self.UNIQUE_DOMAINS:
+        #         self._update_item_vector()
 
         if hasattr(self, "sampler"):
             if hasattr(self.sampler, "update"):
@@ -312,6 +313,10 @@ class CrossRetriever(basemodel.BaseRetriever):
         output_list = {}
         for domain_name in self.SOURCE_DOMAINS:
             domain_batch = batch[domain_name]
+            if hasattr(self.query_encoder, 'domain_user_embeddings'):
+                # Update domain specific embedding
+                self.query_encoder.user_embeddings = self.query_encoder.domain_user_embeddings[domain_name]
+                self.item_encoder.item_embeddings = self.item_encoder.domain_item_embeddings[domain_name]
             domain_output = super().forward(domain_batch, full_score, return_query,return_item, return_neg_item, return_neg_id)
             output_list[domain_name] = domain_output
         return output_list
@@ -456,6 +461,7 @@ class CrossRetriever(basemodel.BaseRetriever):
         self.datasets = meta_dataset
         self.SOURCE_DOMAINS = meta_dataset.source_dataset_names
         self.TARGET_DOMAINS = meta_dataset.target_dataset_names
+        self.UNIQUE_DOMAINS = meta_dataset.unique_dataset_names
         self.DOMAIN_USER_ID = {}
         self.DOMAIN_ITEM_ID = {}
         for domain_name in meta_dataset.unique_dataset_names:
