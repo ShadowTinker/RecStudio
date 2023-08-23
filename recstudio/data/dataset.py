@@ -2096,14 +2096,18 @@ class CombinedLoaders(object):
         return batch
 
 class CrossDomainLoaders(object):
-    def __init__(self, loaders) -> None:
+    def __init__(self, loaders, combine=False) -> None:
         r"""
         The first loader will dominating the training procedure.
         """
         self.loaders = copy.deepcopy(loaders)
+        self.combine = combine
 
     def __len__(self):
-        return len(self.loaders[0])
+        if self.combine:
+            return sum([len(l) for l in self.loaders])
+        else: # The first loader will be set as the main loader
+            return len(self.loaders[0])
 
     def __iter__(self):
         for i, l in enumerate(self.loaders):
@@ -2128,19 +2132,33 @@ class CrossDomainLoaders(object):
 
     def __next__(self):
         total_batch = {}
-        for i, l in enumerate(self.loaders):
-            domain_name = l._dataset.name
-            if i == 0:
-                batch = next(l)
-            else:
-                # Start a new interation when this dataset is shorter than the first dataset.
+        if self.combine:
+            for i, l in enumerate(self.loaders):
+                domain_name = l._dataset.name
                 try:
                     batch = next(l)
+                    batch = self._token_id_remap(batch, l._dataset)
+                    total_batch[domain_name] = batch
+                    break
                 except StopIteration:
+                    if i == len(self.loaders) - 1:
+                        raise StopIteration()
+                    else:
+                        continue
+        else:
+            for i, l in enumerate(self.loaders):
+                domain_name = l._dataset.name
+                if i == 0:
                     batch = next(l)
-            batch = self._token_id_remap(batch, l._dataset)
-            # rst = self._add_domain_prefix(rst, domain_name)
-            total_batch[domain_name] = batch
+                else:
+                    # Start a new interation when this dataset is shorter than the first dataset.
+                    try:
+                        batch = next(l)
+                    except StopIteration:
+                        batch = next(l)
+                batch = self._token_id_remap(batch, l._dataset)
+                # rst = self._add_domain_prefix(rst, domain_name)
+                total_batch[domain_name] = batch
         return total_batch
 
 class DatasetFromSampler(Dataset):

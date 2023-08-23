@@ -21,7 +21,7 @@ from recstudio.model import init, basemodel, loss_func
 from recstudio.utils import callbacks
 from recstudio.utils.utils import *
 from recstudio.utils.data_parallel import data_parallel
-from recstudio.data.dataset import (CrossDomainDataset, CrossDomainLoaders)
+from recstudio.data.dataset import (CrossDomainDataset, CrossDomainLoaders, CombinedLoaders)
 from recstudio.data import UserDataset, SeqDataset
 
 
@@ -123,7 +123,8 @@ class CrossRetriever(basemodel.BaseRetriever):
         optimizers = self.current_epoch_optimizers(nepoch)
 
         trn_dataloaders, combine = self.current_epoch_trainloaders(nepoch)
-        trn_dataloaders = [CrossDomainLoaders(trn_dataloaders)]
+        trn_dataloaders = [CrossDomainLoaders(trn_dataloaders, True)]
+        # trn_dataloaders = trn_dataloaders
 
         if not (isinstance(optimizers, List) or isinstance(optimizers, Tuple)):
             optimizers = [optimizers]
@@ -312,6 +313,8 @@ class CrossRetriever(basemodel.BaseRetriever):
         ):
         output_list = {}
         for domain_name in self.SOURCE_DOMAINS:
+            if batch.get(domain_name, None) == None:
+                continue
             domain_batch = batch[domain_name]
             if hasattr(self.query_encoder, 'domain_user_embeddings'):
                 # Update domain specific embedding

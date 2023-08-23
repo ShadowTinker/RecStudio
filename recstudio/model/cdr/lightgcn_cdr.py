@@ -71,6 +71,8 @@ class LightGCN_CDR(basemodel.CrossRetriever):
         outputs = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss), True, True)
         loss_value = 0
         for idx, domain in enumerate(self.SOURCE_DOMAINS):
+            if outputs.get(domain, None) == None:
+                continue
             score = outputs[domain]['score']
             score['label'] = batch[domain][self.frating]
             domain_loss = self.loss_fn(**score)

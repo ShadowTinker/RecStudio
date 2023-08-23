@@ -4,7 +4,13 @@ data:
     binaried_rating_thres: 0.0
 
 eval:
-    batch_size: 20
+    batch_size: 512
+    cutoff: [20, 10]
+    val_metrics: [ndcg, recall]
+    val_n_epoch: 1
+    test_metrics: [ndcg, recall]
+    topk: 100
+    save_path: './saved/'
 
 model:
     embed_dim: 64
