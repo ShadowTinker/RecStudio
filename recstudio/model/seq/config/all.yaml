@@ -4,4 +4,10 @@ data:
   split_ratio: 2
 
 eval:
-  batch_size: 128
+  batch_size: 512
+  cutoff: [20]
+  val_metrics: [ndcg, recall]
+  val_n_epoch: 1
+  test_metrics: [ndcg, recall]
+  topk: 100
+  save_path: './saved/'
