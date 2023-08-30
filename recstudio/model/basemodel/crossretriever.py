@@ -21,8 +21,8 @@ from recstudio.model import init, basemodel, loss_func
 from recstudio.utils import callbacks
 from recstudio.utils.utils import *
 from recstudio.utils.data_parallel import data_parallel
-from recstudio.data.dataset import (CrossDomainDataset, CrossDomainLoaders, CombinedLoaders)
-from recstudio.data import UserDataset, SeqDataset
+from recstudio.data.dataset import (CrossDomainLoaders, CombinedLoaders)
+from recstudio.data import UserDataset, SeqDataset, CrossDomainDataset, CrossDomainSeqDataset
 
 
 class CrossRetriever(basemodel.BaseRetriever):
@@ -123,8 +123,7 @@ class CrossRetriever(basemodel.BaseRetriever):
         optimizers = self.current_epoch_optimizers(nepoch)
 
         trn_dataloaders, combine = self.current_epoch_trainloaders(nepoch)
-        trn_dataloaders = [CrossDomainLoaders(trn_dataloaders, True)]
-        # trn_dataloaders = trn_dataloaders
+        trn_dataloaders = [CrossDomainLoaders(trn_dataloaders, False)]
 
         if not (isinstance(optimizers, List) or isinstance(optimizers, Tuple)):
             optimizers = [optimizers]
@@ -193,6 +192,25 @@ class CrossRetriever(basemodel.BaseRetriever):
                 output_list.append(outputs)
         return output_list
 
+    def _token_id_remap(self, batch, dataset):
+        mapping_dict = dataset.reverse_field2token2idx
+        for field in mapping_dict:
+            # original value for 0 is '[PAD]'
+            mapping_dict[field][0] = 0
+        def remap(x, *args):
+            return field_mapping[x]
+        for field, batch_data in batch.items():
+            if field in mapping_dict:
+                if field not in self.query_fields:
+                    continue
+                field_mapping = mapping_dict[field]
+                batch[field] = batch_data.map_(batch_data, remap)
+            elif field in self.query_fields and field[3:] in mapping_dict:
+                # field[3:] means remove potential 'in_' prefix for Seq dataset 
+                field_mapping = mapping_dict[field[3:]]
+                batch[field] = batch_data.map_(batch_data, remap)
+        return batch
+
     @torch.no_grad()
     def validation_epoch(self, nepoch, dataloaders):
         if hasattr(self, '_update_item_vector'):
@@ -203,9 +221,6 @@ class CrossRetriever(basemodel.BaseRetriever):
         for loader in dataloaders:
             dataset = loader.dataset
             domain = dataset.name
-            mapping_dict = dataset.reverse_field2token2idx[self.fuid]
-            def remap(x, *args):
-                return mapping_dict[x]
             self._update_item_vector(domain)
             loader = tqdm(
                 loader,
@@ -216,8 +231,9 @@ class CrossRetriever(basemodel.BaseRetriever):
                 disable=self.run_mode == 'tune', # Mute the progressbar when tuning
             )
             for domain_batch_num, batch in enumerate(loader):
-                # remap local token id to global token id, which will ensure generation of correct queries
-                batch[self.fuid] = batch[self.fuid].map_(batch[self.fuid], remap)
+                # remap local query related token id to meta token id, ensuring correct queries.
+                # 'item_id' will not be remapped, as the evaluation is performed in domain context.
+                batch = self._token_id_remap(batch, dataset)
                 # data to device
                 batch = self._to_device(batch, self._parameter_device)
 
@@ -246,13 +262,10 @@ class CrossRetriever(basemodel.BaseRetriever):
         for loader in dataloaders:
             dataset = loader.dataset
             domain = dataset.name
-            mapping_dict = dataset.reverse_field2token2idx[self.fuid]
-            def remap(x, *args):
-                return mapping_dict[x]
             self._update_item_vector(domain)
             for domain_batch_num, batch in enumerate(loader):
-                # remap local token id to global token id, which will ensure generation of correct queries
-                batch[self.fuid] = batch[self.fuid].map_(batch[self.fuid], remap)
+                # remap local token id to meta token id
+                batch = self._token_id_remap(batch, dataset)
                 # data to device
                 batch = self._to_device(batch, self._parameter_device)
 
@@ -320,7 +333,8 @@ class CrossRetriever(basemodel.BaseRetriever):
                 # Update domain specific embedding
                 self.query_encoder.user_embeddings = self.query_encoder.domain_user_embeddings[domain_name]
                 self.item_encoder.item_embeddings = self.item_encoder.domain_item_embeddings[domain_name]
-            domain_output = super().forward(domain_batch, full_score, return_query,return_item, return_neg_item, return_neg_id)
+            self.sampler.set_domain(domain_name)
+            domain_output = super().forward(domain_batch, full_score, return_query, return_item, return_neg_item, return_neg_id)
             output_list[domain_name] = domain_output
         return output_list
 
@@ -328,6 +342,8 @@ class CrossRetriever(basemodel.BaseRetriever):
         outputs = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
         loss_value = 0
         for domain in self.SOURCE_DOMAINS:
+            if outputs.get(domain, None) == None:
+                continue
             score = outputs[domain]['score']
             score['label'] = batch[domain][self.frating]
             loss_value += self.loss_fn(**score)
@@ -450,10 +466,9 @@ class CrossRetriever(basemodel.BaseRetriever):
                 self.loss_fn = self._get_loss_func()
         # ============== Register as a basic Retriever ================
         self.query_fields = set(meta_dataset.user_feat.fields).intersection(meta_dataset.use_field)
-        if isinstance(meta_dataset, UserDataset) or isinstance(meta_dataset, SeqDataset):
-            raise NotImplementedError
+        if isinstance(meta_dataset, UserDataset) or isinstance(meta_dataset, CrossDomainSeqDataset):
             self.query_fields = self.query_fields | set(["in_"+f for f in self.item_fields])
-            if isinstance(train_data, SeqDataset):
+            if isinstance(meta_dataset, CrossDomainSeqDataset):
                 self.query_fields = self.query_fields | set(['seqlen'])
 
         self.fiid = meta_dataset.fiid

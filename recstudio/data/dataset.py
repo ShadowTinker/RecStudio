@@ -1536,6 +1536,13 @@ class SingleDomainDataset(TripletDataset):
         tensors = pad_sequence(tensors, batch_first=True)
         return tensors, user_count
 
+class SingleDomainSeqDataset(SingleDomainDataset, SeqDataset):
+    def __init__(self, name = 'ml-100k', config = None):
+        super().__init__(name, config)
+
+class SingleDomainSeqToSeqDataset(SingleDomainDataset, SeqToSeqDataset):
+    def __init__(self, name = 'ml-100k', config = None):
+        super().__init__(name, config)
 
 class CrossDomainDataset(TripletDataset):
     r""":class:`CrossDomainDataset` is based on :class:`~recbole.data.dataset.dataset.Dataset`,
@@ -1810,6 +1817,42 @@ class CrossDomainDataset(TripletDataset):
             self._update_inter_feat(built_datasets_list[0])
             # self.user_hist, self.user_count = self.get_hist(True) # TODO: add for togather training and testing.
             return self, built_datasets_list
+
+class CrossDomainSeqDataset(CrossDomainDataset):
+    def _register_subdatasets(self, config):
+        self._source_datasets = OrderedDict()
+        self._target_datasets = OrderedDict()
+        self._unique_datasets = OrderedDict()
+        for dataset_name in self.source_dataset_names:
+            dataset = SingleDomainSeqDataset(dataset_name, config)
+            self._source_datasets[dataset_name] = dataset
+            self._unique_datasets[dataset_name] = dataset
+
+        for dataset_name in self.target_dataset_names:
+            if dataset_name in self.source_dataset_names:
+                self._target_datasets[dataset_name] = self._source_datasets[dataset_name]
+            else:
+                dataset = SingleDomainSeqDataset(dataset)
+                self._target_datasets[dataset_name] = dataset
+                self._unique_datasets[dataset_name] = dataset
+
+class CrossDomainSeqToSeqDataset(CrossDomainSeqDataset):
+    def _register_subdatasets(self, config):
+        self._source_datasets = OrderedDict()
+        self._target_datasets = OrderedDict()
+        self._unique_datasets = OrderedDict()
+        for dataset_name in self.source_dataset_names:
+            dataset = SingleDomainSeqToSeqDataset(dataset_name, config)
+            self._source_datasets[dataset_name] = dataset
+            self._unique_datasets[dataset_name] = dataset
+
+        for dataset_name in self.target_dataset_names:
+            if dataset_name in self.source_dataset_names:
+                self._target_datasets[dataset_name] = self._source_datasets[dataset_name]
+            else:
+                dataset = SingleDomainSeqToSeqDataset(dataset)
+                self._target_datasets[dataset_name] = dataset
+                self._unique_datasets[dataset_name] = dataset
 
 class TensorFrame(Dataset):
     r"""The main data structure used to save interaction data in RecStudio dataset.
@@ -2100,18 +2143,21 @@ class CrossDomainLoaders(object):
         r"""
         The first loader will dominating the training procedure.
         """
-        self.loaders = copy.deepcopy(loaders)
+        self.original_loaders = copy.deepcopy(loaders)
+        self.loaders = [iter(l) for l in self.original_loaders]
         self.combine = combine
 
     def __len__(self):
         if self.combine:
-            return sum([len(l) for l in self.loaders])
+            return sum([len(l) for l in self.original_loaders])
         else: # The first loader will be set as the main loader
-            return len(self.loaders[0])
+            return len(self.original_loaders[0])
 
     def __iter__(self):
-        for i, l in enumerate(self.loaders):
-            self.loaders[i] = iter(l)
+        if self.combine:
+            self.loaders = [iter(l) for l in self.original_loaders]
+        else:
+            self.loaders[0] = iter(self.original_loaders[0]) # Only reset the main loader
         return self
 
     @staticmethod
@@ -2122,11 +2168,18 @@ class CrossDomainLoaders(object):
 
     def _token_id_remap(self, batch, dataset):
         mapping_dict = dataset.reverse_field2token2idx
+        for field in mapping_dict:
+            # original value for 0 is '[PAD]'
+            mapping_dict[field][0] = 0
         def remap(x, *args):
             return field_mapping[x]
         for field, batch_data in batch.items():
-            if field in mapping_dict.keys():
+            if field in mapping_dict:
                 field_mapping = mapping_dict[field]
+                batch[field] = batch_data.map_(batch_data, remap)
+            elif field[3:] in mapping_dict:
+                # field[3:] means remove potential 'in_' prefix for Seq dataset 
+                field_mapping = mapping_dict[field[3:]]
                 batch[field] = batch_data.map_(batch_data, remap)
         return batch
 
@@ -2146,18 +2199,18 @@ class CrossDomainLoaders(object):
                     else:
                         continue
         else:
-            for i, l in enumerate(self.loaders):
-                domain_name = l._dataset.name
+            for i in range(len(self.loaders)):
+                domain_name = self.loaders[i]._dataset.name
                 if i == 0:
-                    batch = next(l)
+                    batch = next(self.loaders[i])
                 else:
                     # Start a new interation when this dataset is shorter than the first dataset.
                     try:
-                        batch = next(l)
+                        batch = next(self.loaders[i])
                     except StopIteration:
-                        batch = next(l)
-                batch = self._token_id_remap(batch, l._dataset)
-                # rst = self._add_domain_prefix(rst, domain_name)
+                        self.loaders[i] = iter(self.original_loaders[i])
+                        batch = next(self.loaders[i])
+                batch = self._token_id_remap(batch, self.loaders[i]._dataset)
                 total_batch[domain_name] = batch
         return total_batch
 

@@ -1,3 +1,5 @@
+# source_dataset_names: [amazon-health, amazon-beauty]
+# target_dataset_names: [amazon-health, amazon-beauty]
 # source_dataset_names: [amazon-beauty, amazon-health]
 # target_dataset_names: [amazon-beauty, amazon-health]
 source_dataset_names: [amazon-beauty, amazon-toys]
@@ -6,3 +8,5 @@ target_dataset_names: [amazon-beauty, amazon-toys]
 # target_dataset_names: [amazon-toys, amazon-beauty]
 domain_sampling: 'separate' # selected among ['separate', 'togather']
 save_cache: True
+seq: True
+max_seq_len: 50
