@@ -40,8 +40,9 @@ class LightGCN_CDR(basemodel.CrossRetriever):
     def _get_score_func(self):
         return scorer.InnerProductScorer()
 
-    def _get_sampler(self, train_data):
-        return sampler.UniformSampler(train_data.num_items)
+    def _get_sampler(self, meta_dataset):
+        r"""Uniform sampler is used as negative sampler."""
+        return sampler.CrossDomainUniformSampler(meta_dataset)
 
     def _get_query_encoder(self, train_data):
         return graphmodule.GraphUserEncoder()

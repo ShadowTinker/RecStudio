@@ -112,6 +112,38 @@ class UniformSampler(Sampler):
     def compute_item_p(self, query, pos_items):
         return torch.zeros_like(pos_items)
 
+class CrossDomainUniformSampler(UniformSampler):
+    def __init__(self, meta_dataset, scorer_fn=None):
+        super(CrossDomainUniformSampler, self).__init__(meta_dataset.num_items) # Should not be used.
+        self.sub_samplers = torch.nn.ModuleDict()
+        self.neg_remapping = {}
+        for dataset in meta_dataset.unique_datasets('all'):
+            self.sub_samplers[dataset.name] = UniformSampler(dataset.num_items)
+            self.neg_remapping[dataset.name] = torch.tensor(
+                [0] + list(dataset.reverse_field2token2idx[meta_dataset.fiid].values())[1:]
+            )# The first remapping token id is '[PAD]', which is transformed to 0.
+
+    def set_domain(self, domain):
+        self.domain = domain
+        self.activated_sampler = self.sub_samplers[domain]
+
+    def forward(self, query, num_neg, pos_items = None, device = None):
+        """
+        Utilize sub-sampler of each domain to sample in-domain neg items and remap them to meta domain.
+        """
+        rst = self.sub_samplers[self.domain].forward(query, num_neg, pos_items, device)
+
+        meta_neg_id = self.neg_remapping[self.domain].to(query.device)
+        if len(rst) == 3:
+            pos_prob, neg_items, neg_prob = rst
+            neg_items = meta_neg_id[neg_items]
+            return pos_prob, neg_items, neg_prob
+        else:
+            neg_items, neg_prob = rst
+            neg_items = meta_neg_id[neg_items]
+            return neg_items, neg_prob
+
+
 
 def uniform_sample_masked_hist(num_items: int, num_neg: int, user_hist: Tensor, num_query_per_user: int = None):
     """Sampling from ``1`` to ``num_items`` uniformly with masking items in user history.

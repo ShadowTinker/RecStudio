@@ -22,5 +22,6 @@ class BPR_CDR(basemodel.CrossRetriever):
     def _get_loss_func(self):
         return loss_func.BPRLoss()
 
-    def _get_sampler(self, train_data):
-        return sampler.UniformSampler(train_data.num_items)
+    def _get_sampler(self, meta_dataset):
+        r"""Uniform sampler is used as negative sampler."""
+        return sampler.CrossDomainUniformSampler(meta_dataset)
