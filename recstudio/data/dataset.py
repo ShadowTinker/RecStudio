@@ -1659,7 +1659,6 @@ class CrossDomainDataset(TripletDataset):
     def _init_common_field(self):
         # TODO: only support datasets with same fields
         super()._init_common_field()
-        sub_dataset = self.source_datasets(0)
         for sub_dataset in self.unique_datasets('all'):
             sub_dataset.domain_field2tokens = {}
             sub_dataset.domain_field2token2idx = {}
@@ -1764,12 +1763,12 @@ class CrossDomainDataset(TripletDataset):
             dataset._generate_reverse_map() # Further reduce global token id in each dataset to local token id.
             dataset._post_preprocess()
 
-    def _update_inter_feat(self, built_datasets_list):
+    def _update_meta_inter_feat(self, built_datasets_list):
         r"""Generate data_index for meta-dataset with data_index of sub-datasets w.r.t training splits.
-        We don't generate valid/test data index to avoid data leak.
+        We don't generate valid/test data index to avoid potential data leak.
         Datasets in built_datasets_list are sorted as in self.unique_dataset_names.
         """
-        # Update self.inter_feat with inter_feat of sub-datasets
+        # Update self.inter_feat with processed inter_feat of sub-datasets
         def remap(x, *args):
             return field_mapping[x]
         inter_feat_data_list = {field: [] for field in self.inter_feat.fields}
@@ -1818,7 +1817,7 @@ class CrossDomainDataset(TripletDataset):
             # self.user_hist, self.user_count = self.get_hist(True) # TODO: add for togather training and testing.
             return self, built_datasets_list
 
-class CrossDomainSeqDataset(CrossDomainDataset):
+class CrossDomainSeqDataset(CrossDomainDataset, SeqDataset):
     def _register_subdatasets(self, config):
         self._source_datasets = OrderedDict()
         self._target_datasets = OrderedDict()
@@ -1832,11 +1831,11 @@ class CrossDomainSeqDataset(CrossDomainDataset):
             if dataset_name in self.source_dataset_names:
                 self._target_datasets[dataset_name] = self._source_datasets[dataset_name]
             else:
-                dataset = SingleDomainSeqDataset(dataset)
+                dataset = SingleDomainSeqDataset(dataset_name, config)
                 self._target_datasets[dataset_name] = dataset
                 self._unique_datasets[dataset_name] = dataset
 
-class CrossDomainSeqToSeqDataset(CrossDomainSeqDataset):
+class CrossDomainSeqToSeqDataset(CrossDomainSeqDataset, SeqToSeqDataset):
     def _register_subdatasets(self, config):
         self._source_datasets = OrderedDict()
         self._target_datasets = OrderedDict()
@@ -1850,7 +1849,7 @@ class CrossDomainSeqToSeqDataset(CrossDomainSeqDataset):
             if dataset_name in self.source_dataset_names:
                 self._target_datasets[dataset_name] = self._source_datasets[dataset_name]
             else:
-                dataset = SingleDomainSeqToSeqDataset(dataset)
+                dataset = SingleDomainSeqToSeqDataset(dataset_name, config)
                 self._target_datasets[dataset_name] = dataset
                 self._unique_datasets[dataset_name] = dataset
 

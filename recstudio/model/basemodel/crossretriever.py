@@ -108,10 +108,6 @@ class CrossRetriever(basemodel.BaseRetriever):
         return self.callback.best_ckpt['metric']
 
     def training_epoch(self, nepoch):
-        # if hasattr(self, "_update_item_vector"):
-        #     for domain in self.UNIQUE_DOMAINS:
-        #         self._update_item_vector()
-
         if hasattr(self, "sampler"):
             if hasattr(self.sampler, "update"):
                 if hasattr(self, 'item_vector'):
