@@ -6,7 +6,7 @@ source_dataset_names: [amazon-beauty, amazon-toys]
 target_dataset_names: [amazon-beauty, amazon-toys]
 # source_dataset_names: [amazon-toys, amazon-beauty]
 # target_dataset_names: [amazon-toys, amazon-beauty]
-domain_sampling: 'separate' # selected among ['separate', 'togather']
+domain_sampling: 'togather' # selected among ['separate', 'togather', 'one_by_one']
 save_cache: True
 seq: True
 max_seq_len: 50

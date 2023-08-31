@@ -115,6 +115,7 @@ class UniformSampler(Sampler):
 class CrossDomainUniformSampler(UniformSampler):
     def __init__(self, meta_dataset, scorer_fn=None):
         super(CrossDomainUniformSampler, self).__init__(meta_dataset.num_items) # Should not be used.
+        self.domain_sampling = meta_dataset.config['domain_sampling']
         self.sub_samplers = torch.nn.ModuleDict()
         self.neg_remapping = {}
         for dataset in meta_dataset.unique_datasets('all'):
@@ -124,24 +125,48 @@ class CrossDomainUniformSampler(UniformSampler):
             )# The first remapping token id is '[PAD]', which is transformed to 0.
 
     def set_domain(self, domain):
-        self.domain = domain
-        self.activated_sampler = self.sub_samplers[domain]
+        if isinstance(domain, str):
+            # 'separate' or 'one_by_one'
+            self.domain = domain
+            self.activated_sampler = self.sub_samplers[domain]
+        elif isinstance(domain, torch.Tensor):
+            # 'togather'
+            self.domain = domain
 
     def forward(self, query, num_neg, pos_items = None, device = None):
         """
         Utilize sub-sampler of each domain to sample in-domain neg items and remap them to meta domain.
         """
-        rst = self.sub_samplers[self.domain].forward(query, num_neg, pos_items, device)
+        if self.domain_sampling == 'togather':
+            neg_items_all = 0
+            for idx, (domain_name, sampler) in enumerate(self.sub_samplers.items()):
+                rst = sampler.forward(query, num_neg, pos_items, device)
+                meta_neg_id = self.neg_remapping[domain_name].to(query.device)
+                if len(rst) == 3:
+                    pos_prob, neg_items, neg_prob = rst
+                    neg_items = meta_neg_id[neg_items]
+                else:
+                    neg_items, neg_prob = rst
+                    neg_items = meta_neg_id[neg_items]
+                domain_mask = self.domain == idx + 1 # domain_id 0 represents masked token
+                neg_items_all += neg_items * domain_mask.unsqueeze(-1)
+            if len(rst) == 3:
+                return pos_prob, neg_items_all, neg_prob
+            else:
+                return neg_items_all, neg_prob
 
-        meta_neg_id = self.neg_remapping[self.domain].to(query.device)
-        if len(rst) == 3:
-            pos_prob, neg_items, neg_prob = rst
-            neg_items = meta_neg_id[neg_items]
-            return pos_prob, neg_items, neg_prob
         else:
-            neg_items, neg_prob = rst
-            neg_items = meta_neg_id[neg_items]
-            return neg_items, neg_prob
+            rst = self.sub_samplers[self.domain].forward(query, num_neg, pos_items, device)
+
+            meta_neg_id = self.neg_remapping[self.domain].to(query.device)
+            if len(rst) == 3:
+                pos_prob, neg_items, neg_prob = rst
+                neg_items = meta_neg_id[neg_items]
+                return pos_prob, neg_items, neg_prob
+            else:
+                neg_items, neg_prob = rst
+                neg_items = meta_neg_id[neg_items]
+                return neg_items, neg_prob
 
 
 

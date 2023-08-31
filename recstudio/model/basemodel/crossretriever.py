@@ -118,8 +118,7 @@ class CrossRetriever(basemodel.BaseRetriever):
         output_list = []
         optimizers = self.current_epoch_optimizers(nepoch)
 
-        trn_dataloaders, combine = self.current_epoch_trainloaders(nepoch)
-        trn_dataloaders = [CrossDomainLoaders(trn_dataloaders, False)]
+        trn_dataloaders = self.current_epoch_trainloaders(nepoch)
 
         if not (isinstance(optimizers, List) or isinstance(optimizers, Tuple)):
             optimizers = [optimizers]
@@ -320,19 +319,24 @@ class CrossRetriever(basemodel.BaseRetriever):
             return_neg_item: bool = False,
             return_neg_id: bool = False
         ):
-        output_list = {}
-        for domain_name in self.SOURCE_DOMAINS:
-            if batch.get(domain_name, None) == None:
-                continue
-            domain_batch = batch[domain_name]
-            if hasattr(self.query_encoder, 'domain_user_embeddings'):
-                # Update domain specific embedding
-                self.query_encoder.user_embeddings = self.query_encoder.domain_user_embeddings[domain_name]
-                self.item_encoder.item_embeddings = self.item_encoder.domain_item_embeddings[domain_name]
-            self.sampler.set_domain(domain_name)
-            domain_output = super().forward(domain_batch, full_score, return_query, return_item, return_neg_item, return_neg_id)
-            output_list[domain_name] = domain_output
-        return output_list
+        if self.fuid in batch:
+            # domain sampling is set to 'togather'
+            self.sampler.set_domain(batch['domain_id'])
+            return super().forward(batch, full_score, return_query, return_item, return_neg_item, return_neg_id)
+        else:
+            output_list = {}
+            for domain_name in self.SOURCE_DOMAINS:
+                if batch.get(domain_name, None) == None:
+                    continue
+                domain_batch = batch[domain_name]
+                if hasattr(self.query_encoder, 'domain_user_embeddings'):
+                    # Update domain specific embedding
+                    self.query_encoder.user_embeddings = self.query_encoder.domain_user_embeddings[domain_name]
+                    self.item_encoder.item_embeddings = self.item_encoder.domain_item_embeddings[domain_name]
+                self.sampler.set_domain(domain_name)
+                domain_output = super().forward(domain_batch, full_score, return_query, return_item, return_neg_item, return_neg_id)
+                output_list[domain_name] = domain_output
+            return output_list
 
     def training_step(self, batch):
         outputs = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
@@ -443,6 +447,12 @@ class CrossRetriever(basemodel.BaseRetriever):
                 self.callback.save_checkpoint(nepoch)
                 self.ckpt_path = self.callback.get_checkpoint_path()
 
+    def _set_data_field(self, data):
+        data.use_field = set([data.fuid, data.fiid, data.frating, 'domain_id'])
+        if hasattr(self, 'logger'):
+            self.logger.info("The default fields to be used is set as [user_id, item_id, rating, domain_id]. "
+                             "If more fields are needed, please use `self._set_data_field()` to reset.")
+
     def _init_model(self, meta_dataset : CrossDomainDataset, train_data, drop_unused_field=True):
         # ============= Register as a basic Recommender ===============
         self._set_data_field(meta_dataset)
@@ -478,6 +488,7 @@ class CrossRetriever(basemodel.BaseRetriever):
         self.UNIQUE_DOMAINS = meta_dataset.unique_dataset_names
         self.DOMAIN_USER_ID = {}
         self.DOMAIN_ITEM_ID = {}
+        self.domain_sampling = meta_dataset.config['domain_sampling']
         for domain_name in meta_dataset.unique_dataset_names:
             dataset = meta_dataset.unique_datasets(domain_name)
 
@@ -519,6 +530,19 @@ class CrossRetriever(basemodel.BaseRetriever):
 
         if self.use_index:
             self.ann_index = self.build_ann_index()
+
+    def current_epoch_trainloaders(self, nepoch) -> Tuple:
+        r"""
+        Returns:
+            list or dict or Dataloader : the train loaders used in the current epoch
+            bool : whether to combine the train loaders or use them alternately in one epoch.
+        """
+        if self.domain_sampling == 'togather':
+            return self.trainloaders
+        elif self.domain_sampling == 'one_by_one':
+            return [CrossDomainLoaders(self.trainloaders, True)]
+        elif self.domain_sampling == 'separate':
+            return [CrossDomainLoaders(self.trainloaders, False)]
 
     def _get_train_loaders(self, train_data : List, ddp=False) -> List:
         return [

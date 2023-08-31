@@ -1577,7 +1577,7 @@ class CrossDomainDataset(TripletDataset):
             if self.config['save_cache']:
                 self._save_cache(md5(self.config))
                 
-        self._use_field = set([self.fuid, self.fiid, self.frating])
+        self._use_field = set([self.fuid, self.fiid, self.frating, 'domain_id'])
 
     def __repr__(self):
         # TODO: add statistics of CDR problem.
@@ -1652,7 +1652,7 @@ class CrossDomainDataset(TripletDataset):
             if dataset_name in self.source_dataset_names:
                 self._target_datasets[dataset_name] = self._source_datasets[dataset_name]
             else:
-                dataset = SingleDomainDataset(dataset)
+                dataset = SingleDomainDataset(dataset_name, config)
                 self._target_datasets[dataset_name] = dataset
                 self._unique_datasets[dataset_name] = dataset
 
@@ -1669,17 +1669,20 @@ class CrossDomainDataset(TripletDataset):
         return fields_share_space
 
     def _get_feat_list(self):
-        feat_list = list(zip(*[_._get_feat_list() for _ in list(self._unique_datasets.values())]))
-        domain_split = []
-        for feat_pair in feat_list:
-            domain_split.append([0])
-            for feat in feat_pair:
-                if feat is not None:
-                    domain_split[-1].append(len(feat))
-                else:
-                    domain_split[-1].append(0)
-            domain_split[-1] = np.cumsum(domain_split[-1])
-        return feat_list, domain_split
+        try:
+            return [self.inter_feat, self.user_feat, self.item_feat]
+        except:
+            feat_list = list(zip(*[_._get_feat_list() for _ in list(self._unique_datasets.values())]))
+            domain_split = []
+            for feat_pair in feat_list:
+                domain_split.append([0])
+                for feat in feat_pair:
+                    if feat is not None:
+                        domain_split[-1].append(len(feat))
+                    else:
+                        domain_split[-1].append(0)
+                domain_split[-1] = np.cumsum(domain_split[-1])
+            return feat_list, domain_split
     
     def _remap_all_domains(self):
         # TODO: domain in target while not in source
@@ -1783,37 +1786,63 @@ class CrossDomainDataset(TripletDataset):
         for field in self.inter_feat.fields:
             self.inter_feat.data[field] = torch.cat(inter_feat_data_list[field])
         self.inter_feat = TensorFrame.fromPandasDF(pd.DataFrame.from_dict(self.inter_feat.data), self) # Rebuild self.inter_feat
-        # Compute data index
-        data_index_list = [copy.deepcopy(_.data_index) for _ in built_datasets_list]
         dataset_length_list = [_.inter_feat.__len__() for _ in built_datasets_list]
+        self.inter_feat.data['domain_id'] = torch.cat([
+            (idx + 1) * torch.ones(l, dtype=torch.int64) for idx, l in enumerate(dataset_length_list)
+        ]) # Domain id for masked tokens is set to 0
+        # Calculate meta data index with domain data index
+        data_index_list = [copy.deepcopy(_.data_index) for _ in built_datasets_list]
         for idx, data_index in enumerate(data_index_list[1:]):
-            data_index += dataset_length_list[idx]
+            if data_index.dim() == 1:
+                # General CDR dataset
+                data_index += dataset_length_list[idx]
+            elif data_index.dim() == 2:
+                # Seq or SeqToSeq CDR dataset [user_id, start, end]
+                assert isinstance(self, CrossDomainSeqDataset)
+                user_remap = torch.tensor(
+                    [0] + list(built_datasets_list[idx + 1].reverse_field2token2idx[self.fuid].values())[1:]
+                )
+                data_index[:, 0] = user_remap[data_index[:, 0]] # Modify user_id
+                data_index[:, 1:] += dataset_length_list[idx] # Modify start and end index
+            else:
+                raise NotImplementedError
+
         self.data_index = torch.cat(data_index_list)
+
+    def _post_built(self, built_datasets_list):
+        self.dataframe2tensors()
+        self._update_meta_inter_feat(built_datasets_list[0])
 
     def build(
             self, **kwargs
         ):
             # TODO: support for no validation set
             built_datasets_list = [[], [], []]
-            if self.config['domain_sampling'] == 'separate':
-                for dataset_name in self.unique_dataset_names:
-                    if dataset_name not in self.target_dataset_names:
-                        # TODO: Only used for training
-                        pass
-                    elif dataset_name not in self.source_dataset_names:
-                        # TODO: Only used for testing
-                        pass
-                    else:
-                        # Used for both training and testing
-                        built_datasets = self.unique_datasets(dataset_name).build(**kwargs)
-                        built_datasets_list[0].append(built_datasets[0])
-                        built_datasets_list[1].append(built_datasets[1])
-                        built_datasets_list[2].append(built_datasets[2])
-            elif self.config['domain_sampling'] == 'togather':
+            for dataset_name in self.unique_dataset_names:
+                if dataset_name not in self.target_dataset_names:
+                    # TODO: Only used for training
+                    pass
+                elif dataset_name not in self.source_dataset_names:
+                    # TODO: Only used for testing
+                    pass
+                else:
+                    # Used for both training and testing
+                    built_datasets = self.unique_datasets(dataset_name).build(**kwargs)
+                    built_datasets_list[0].append(built_datasets[0])
+                    built_datasets_list[1].append(built_datasets[1])
+                    built_datasets_list[2].append(built_datasets[2])
+            self._post_built(built_datasets_list)
+            if self.config['domain_sampling'] == 'togather':
                 # TODO: mix dataset for sampling
-                pass
-            self.dataframe2tensors()
-            self._update_inter_feat(built_datasets_list[0])
+                assert isinstance(self, CrossDomainSeqDataset)
+                self.inter_feat = pd.DataFrame(self.inter_feat.data)
+                self.user_feat = pd.DataFrame(self.user_feat.data)
+                self.item_feat = pd.DataFrame(self.item_feat.data)
+                self.field2type['domain_id'] = 'token'
+                self.field2tokens['domain_id'] = np.array([_ for _ in range(len(self.unique_dataset_names) + 1)])
+                self.field2token2idx['domain_id'] = {_ : _ for _ in range(len(self.unique_dataset_names) + 1)}
+                meta_built_datasets = super().build(**kwargs)
+                built_datasets_list[0] = [meta_built_datasets[0]]
             # self.user_hist, self.user_count = self.get_hist(True) # TODO: add for togather training and testing.
             return self, built_datasets_list
 

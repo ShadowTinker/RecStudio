@@ -7,6 +7,7 @@ model:
   layer_norm_eps: 1e-12
 
   # directau
+  directau_loss: True
   gamma: 0.5
 
 train:
